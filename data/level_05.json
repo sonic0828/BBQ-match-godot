@@ -1,0 +1,134 @@
+{
+  "level": 5,
+  "timeLimitSec": 120,
+  "tutorial": "",
+  "grills": [
+    {
+      "id": "G1",
+      "initial": [
+        "L",
+        "L",
+        "C"
+      ],
+      "plates": [
+        [
+          "J",
+          "S"
+        ],
+        [
+          "W"
+        ]
+      ]
+    },
+    {
+      "id": "G2",
+      "initial": [
+        "C",
+        "C",
+        "J"
+      ],
+      "plates": [
+        [
+          "L",
+          "C"
+        ],
+        [
+          "J"
+        ]
+      ]
+    },
+    {
+      "id": "G3",
+      "initial": [
+        "J",
+        "J",
+        "S"
+      ],
+      "plates": [
+        [
+          "S",
+          "W"
+        ],
+        [
+          "L"
+        ]
+      ]
+    },
+    {
+      "id": "G4",
+      "initial": [
+        "S",
+        "S",
+        "W"
+      ],
+      "plates": [
+        [
+          "C",
+          "J"
+        ],
+        [
+          "S"
+        ]
+      ]
+    },
+    {
+      "id": "G5",
+      "initial": [
+        "W",
+        "W",
+        "L"
+      ],
+      "plates": [
+        [
+          "W",
+          "L"
+        ],
+        [
+          "C"
+        ]
+      ]
+    },
+    {
+      "id": "G6",
+      "initial": [
+        "L",
+        "C",
+        "J"
+      ],
+      "plates": [
+        [
+          "J",
+          "S",
+          "W"
+        ]
+      ]
+    },
+    {
+      "id": "G7",
+      "initial": [
+        "S",
+        "W",
+        "L"
+      ],
+      "plates": []
+    },
+    {
+      "id": "G8",
+      "initial": [
+        "C",
+        "J",
+        "S"
+      ],
+      "plates": []
+    },
+    {
+      "id": "G9",
+      "initial": [
+        "W",
+        "L",
+        "C"
+      ],
+      "plates": []
+    }
+  ]
+}

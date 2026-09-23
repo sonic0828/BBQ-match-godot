@@ -1,0 +1,61 @@
+{
+  "level": 1,
+  "timeLimitSec": 75,
+  "tutorial": "MOVE",
+  "grills": [
+	{
+	  "id": "G1",
+	  "initial": [
+		"C",
+		"C",
+		null
+	  ],
+	  "plates": []
+	},
+	{
+	  "id": "G2",
+	  "initial": [
+		"L",
+		"L",
+        "J"
+	  ],
+	  "plates": []
+	},
+	{
+	  "id": "G3",
+	  "initial": [
+		"L",
+		"C",
+        "J"
+	  ],
+	  "plates": []
+	},
+	{
+	  "id": "G4",
+	  "initial": [
+		"C",
+		"L",
+		null
+	  ],
+	  "plates": []
+	},
+	{
+	  "id": "G5",
+	  "initial": [
+		"L",
+		"C",
+        "J"
+	  ],
+	  "plates": []
+	},
+	{
+	  "id": "G6",
+	  "initial": [
+		null,
+		"L",
+        "C"
+	  ],
+	  "plates": []
+	}
+  ]
+}
