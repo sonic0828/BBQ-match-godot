@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 // Exercise the actual pinned SDK, including the exporter's patch, rather than
 // duplicating the problematic assignment in a fixture. Export once to cache it.
-const { original, patched } = JSON.parse(execFileSync('python3', ['-c', `
+const { original, patched } = JSON.parse(execFileSync('python3', ['-B', '-c', `
 import hashlib, json, zipfile
 from tools.export_wechat import ROOT, VERSION, SHA256, patch_wechat_sdk
 template = ROOT / 'build/cache' / f'minigame{VERSION}.tpz'
