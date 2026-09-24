@@ -24,6 +24,19 @@ def write_json(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n')
 
 
+def patch_wechat_sdk(source):
+    # The pinned loader owns DPR and may expose a getter-only property. The
+    # legacy SDK forces DPR=1 on iOS, which throws in WeChat's strict modules.
+    warning = ('B&&D&&j&&z&&!_&&console.error("此AppID未开通高性能模式\\n'
+               '请前往mp后台-能力地图-开发提效包-高性能模式开通\\n可大幅提升游戏运行性能")')
+    legacy = (f'if({warning},D)window.devicePixelRatio=1;else if(T)try{{'
+              'window.devicePixelRatio<2&&(window.devicePixelRatio=2)'
+              '}catch(e){console.warn(e)}')
+    if source.count(legacy) != 1:
+        raise ValueError('微信 SDK 像素比例补丁与模板不匹配，请重新检查模板。')
+    return source.replace(legacy, warning + ';')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--appid', default='wxd575463c13869e7d')
@@ -59,6 +72,8 @@ def main():
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(archive.read(name))
             config = json.loads(archive.read('project.config.json'))
+        sdk = stage / 'engine/godot-sdk.js'
+        sdk.write_text(patch_wechat_sdk(sdk.read_text()))
         config.update(appid=args.appid, projectname='烧烤串串消', description='烧烤串串消 · Godot 微信小游戏', isGameTourist=False)
         config['setting']['urlCheck'] = True
         # The engine is already generated/minified. Keep its dynamic binary
@@ -91,6 +106,7 @@ def main():
         write_json(stage / 'export-info.json', {
             'appid': args.appid, 'godot': engine_version,
             'template': URL, 'template_sha256': SHA256,
+            'runtime_patches': ['sdk-preserve-device-pixel-ratio'],
             'total_bytes': total, 'files': sizes,
         })
         # Only replace our generated directory; never clean an arbitrary output.

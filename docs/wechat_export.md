@@ -104,3 +104,13 @@ build/wechat/
 - 根据[模板作者的 iOS 指南](https://get.godots.app/docs/app/ios)，后台需开通高性能模式，且 `game.json` 保留两个 iOS 开关。后台开通状态仍需账号持有人确认。
 - 本机开发者工具的 iOS 真机调试提示要求微信 8.0.61 以上及 USB 连接；二维码面板选中 Android 时不能用于 iPhone 调试。普通“预览”不受此调试连接条件限制。
 - 导出会替换构建目录。若开发者工具仍使用旧文件列表并报 `module 'game.js' is not defined`，关闭该工程窗口后重新打开，重新扫描文件；不需要清理游戏存档。
+
+### iPhone 只读像素比例错误（2026-09-24）
+
+用户反馈同包在 Android 可以启动和操作。iPhone 16 Pro 的诊断弹窗显示微信 8.0.78、基础库 3.17.3、普通模式，在加载分包时抛出 `Attempted to assign to readonly property`，位置为 `godot-sdk.js:1:27905`。
+
+已定位为模板 SDK 的 iOS 分支执行 `window.devicePixelRatio = 1`，与加载器创建的只读 getter 冲突。导出脚本在校验原模板后移除 SDK 的旧像素比例覆盖逻辑，保留高性能模式提醒，让加载器按设备信息管理像素比例；不修改引擎或 WASM 版本。补丁要求精确匹配一次，否则中止导出，避免换模板后静默误改。构建清单的 `runtime_patches` 记录此补丁。
+
+运行 `node --test tests/wechat_sdk.test.cjs tests/wechat_boot.test.cjs` 可验证原模板复现错误及修复后的完整 SDK 初始化。测试使用已缓存并校验 SHA-256 的模板，覆盖 iOS 只读 getter、只读／可写属性及 Android、模拟器、mac 分支。此验证不替代 iPhone 修复包的扫码验收；普通模式下是否存在后续 WASM 或渲染限制，仍以真机结果为准。
+
+本次 17 项检查通过，修复包在微信模拟器正常进入首页，未发现启动脚本或资源错误；普通预览包生成成功，二维码位于 `build/wechat-ios-fix-preview.png`。iPhone 修复包的真机结果待用户扫码反馈。
