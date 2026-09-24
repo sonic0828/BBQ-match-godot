@@ -74,8 +74,9 @@ def main():
             'subpackages': [{'name': 'engine', 'root': 'engine/'}],
         })
         shutil.copy2(ROOT / 'platform/wechat/game.js', stage / 'game.js')
+        shutil.copy2(ROOT / 'platform/wechat/boot-diagnostics.js', stage / 'boot-diagnostics.js')
         shutil.copy2(ROOT / 'platform/wechat/THIRD_PARTY_NOTICES.txt', stage / 'THIRD_PARTY_NOTICES.txt')
-        (stage / 'engine/game.js').write_text("import './godot-sdk'\nimport './godot'\nGODOTSDK.startGame('/engine/godot', '/engine/bbq.bin')\n")
+        shutil.copy2(ROOT / 'platform/wechat/engine-entry.js', stage / 'engine/game.js')
         log = output.parent / 'wechat-export.log'
         subprocess.run([args.godot, '--headless', '--path', str(args.project.resolve()),
                         '--export-pack', args.preset, str(stage / 'engine/bbq.pck'),
