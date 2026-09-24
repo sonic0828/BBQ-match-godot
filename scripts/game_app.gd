@@ -68,6 +68,13 @@ func _ready() -> void:
 			model.state = BoardModel.GameState.PLAYING
 		elif arg.begins_with("--capture="):
 			capture_path = arg.trim_prefix("--capture=")
+	if OS.has_feature("wechat"):
+		_report_wechat_startup.call_deferred()
+
+func _report_wechat_startup() -> void:
+	print("[BBQ scene ready] ", size)
+	await RenderingServer.frame_post_draw
+	print("[BBQ first frame]")
 
 func _layout() -> void:
 	if stage == null:

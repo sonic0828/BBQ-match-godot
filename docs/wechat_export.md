@@ -113,4 +113,28 @@ build/wechat/
 
 运行 `node --test tests/wechat_sdk.test.cjs tests/wechat_boot.test.cjs` 可验证原模板复现错误及修复后的完整 SDK 初始化。测试使用已缓存并校验 SHA-256 的模板，覆盖 iOS 只读 getter、只读／可写属性及 Android、模拟器、mac 分支。此验证不替代 iPhone 修复包的扫码验收；普通模式下是否存在后续 WASM 或渲染限制，仍以真机结果为准。
 
-本次 17 项检查通过，修复包在微信模拟器正常进入首页，未发现启动脚本或资源错误；普通预览包生成成功，二维码位于 `build/wechat-ios-fix-preview.png`。iPhone 修复包的真机结果待用户扫码反馈。
+本次 17 项检查通过，修复包在微信模拟器正常进入首页，未发现启动脚本或资源错误；普通预览包生成成功，二维码位于 `build/wechat-ios-fix-preview.png`。随后用户反馈 iPhone 能通过加载页，但游戏画面空白；只读属性问题已不再阻止加载，不能据此认定真机启动成功。
+
+### 加载后空白的首帧诊断（2026-09-24）
+
+已确认模板加载器的 `cleanup()` 释放 GL 资源后，图片 onload、分包进度及排队的动画帧仍可调用 `render()`。回归测试复现了释放后的绘制。导出补丁增加结束标记，阻止后续绘制、resize 和重复清理；该缺陷是否为 iPhone 空白的直接原因仍需真机验证。
+
+启动入口沿用模板公开的 Engine API，保留 SDK 初始化与 `GODOTSDK.engine`，接入 Godot stdout、stderr 和退出码。引擎启动 Promise 完成后继续等待场景与首帧信号，不再提前移除错误监听。游戏仅在 `wechat` 导出中打印一次场景尺寸和 `RenderingServer.frame_post_draw` 信号。此信号表示 Godot 完成一次绘制，不能单独证明手机屏幕已正确显示。
+
+普通导出在收到首帧后解除启动监听；30 秒未收到首帧则显示当前状态与最近的 Godot 错误。排查包使用：
+
+```bash
+python3 tools/export_wechat.py --diagnostics
+```
+
+诊断包即使收到首帧，也会在 3 秒后显示一次状态，包含构建编号、微信版本、运行模式、WXGLX/WebGL2、画布和绘图缓冲尺寸、上下文丢失状态及 GL 错误。关闭弹窗后可继续检查游戏。下次正常导出不带 `--diagnostics`，即可取消成功时的诊断弹窗；不要将诊断包用于正式发布。
+
+相关验证命令：
+
+```bash
+node --test tests/wechat_boot.test.cjs tests/wechat_sdk.test.cjs tests/wechat_loader.test.cjs
+```
+
+另建的 `build/wechat-webgl-check/` 用于强制普通 WebGL 的本机对照，在修改前已能显示首页；它不代表 iOS 真机兼容结论，也不是手机本轮要扫描的工程。
+
+本轮验证：26 项 JavaScript 回归检查、18 项 Godot 页面／输入检查通过；重新导出成功。微信模拟器显示完整首页，诊断报告场景尺寸 `720×1558`、首帧已绘制、WebGL2 画布／缓冲均为 `1170×2532`、上下文未丢失、GL 错误为 0。普通预览二维码输出至 `build/wechat-ios-render-preview.png`；iPhone 仍需扫码并提供该包的诊断结果，不能用模拟器结果代替真机验收。

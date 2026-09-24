@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Assemble the pinned godothub WeChat runtime with a Godot resource export."""
 import argparse
+from datetime import datetime
 import hashlib
 import json
 from pathlib import Path
@@ -37,6 +38,21 @@ def patch_wechat_sdk(source):
     return source.replace(legacy, warning + ';')
 
 
+def patch_wechat_loader(source):
+    # Image/subpackage callbacks and queued animation frames can outlive cleanup.
+    # They must not draw with deleted GL resources or resize Godot's live canvas.
+    replacements = {
+        '        render() {': '        render() {\n            if (this.disposed) return;',
+        '        resizeCanvases() {': '        resizeCanvases() {\n            if (this.disposed) return;',
+        '        cleanup() {': '        cleanup() {\n            if (this.disposed) return;\n            this.disposed = true;',
+    }
+    for before, after in replacements.items():
+        if source.count(before) != 1:
+            raise ValueError('微信加载器生命周期补丁与模板不匹配，请重新检查模板。')
+        source = source.replace(before, after)
+    return source
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--appid', default='wxd575463c13869e7d')
@@ -45,6 +61,7 @@ def main():
     parser.add_argument('--project', type=Path, default=ROOT)
     parser.add_argument('--preset', default='WeChat Resources')
     parser.add_argument('--output', type=Path, default=ROOT / 'build/wechat')
+    parser.add_argument('--diagnostics', action='store_true', help='启动后显示真机渲染诊断；仅用于排查预览包')
     args = parser.parse_args()
     if len(args.appid) != 18 or not args.appid.startswith('wx'):
         parser.error('AppID 必须为 wx 开头的 18 位字符串。')
@@ -74,6 +91,12 @@ def main():
             config = json.loads(archive.read('project.config.json'))
         sdk = stage / 'engine/godot-sdk.js'
         sdk.write_text(patch_wechat_sdk(sdk.read_text()))
+        loader = stage / 'godot-loader.js'
+        loader.write_text(patch_wechat_loader(loader.read_text()))
+        build_id = datetime.now().strftime('%Y%m%d-%H%M%S')
+        (stage / 'boot-options.js').write_text('module.exports = ' + json.dumps({
+            'diagnostics': args.diagnostics, 'build': build_id,
+        }) + ';\n')
         config.update(appid=args.appid, projectname='烧烤串串消', description='烧烤串串消 · Godot 微信小游戏', isGameTourist=False)
         config['setting']['urlCheck'] = True
         # The engine is already generated/minified. Keep its dynamic binary
@@ -106,7 +129,8 @@ def main():
         write_json(stage / 'export-info.json', {
             'appid': args.appid, 'godot': engine_version,
             'template': URL, 'template_sha256': SHA256,
-            'runtime_patches': ['sdk-preserve-device-pixel-ratio'],
+            'runtime_patches': ['sdk-preserve-device-pixel-ratio', 'loader-stop-after-cleanup'],
+            'diagnostics': args.diagnostics, 'build': build_id,
             'total_bytes': total, 'files': sizes,
         })
         # Only replace our generated directory; never clean an arbitrary output.
