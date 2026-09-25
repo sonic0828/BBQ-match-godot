@@ -4,6 +4,8 @@
 
 游戏名为「烧烤串串消」，美术沿用提供的烧烤食材与烤架，玩法按原始开发文档实现。已提供 **Godot 可玩首版和微信小游戏导出工程**；微信已通过本机模拟器验证，真机仍需验收，抖音尚未适配。
 
+**换电脑或新建 Codex 项目时，先读 [新 Mac 迁移与构建交接](docs/new_mac_setup.md)。** 包含工具版本、首次构建、目录边界和可直接交给新机 Codex 的初始化提示词。iPhone 加载后空白问题仍待最新诊断包真机验证，详见 [微信导出与排错记录](docs/wechat_export.md)。
+
 ## 运行
 
 在 Godot 中打开 `project.godot`，按 **F5**。主场景是 `scenes/main.tscn`。UI 在运行时由脚本生成，编辑器画布中的空根节点是正常的。
@@ -36,6 +38,7 @@
 | `docs/original_plan.md` | 原始开发文档副本 |
 | `docs/verification.md` | 测试结果与验收限制 |
 | `docs/platform_notes.md` | 平台发布准备情况 |
+| `docs/new_mac_setup.md` | 新 Mac 环境接续、微信构建步骤与 Codex 初始化提示词 |
 | `docs/assets.md` | 素材来源、字体许可与背景生成提示词 |
 
 ## 测试
@@ -69,4 +72,4 @@ macOS 默认目录：`~/Library/Application Support/Godot/app_userdata/烧烤串
 
 ## 微信小游戏导出
 
-运行 `python3 tools/export_wechat.py`，将生成的 `build/wechat/` 导入微信开发者工具。AppID 已配置为 `wxd575463c13869e7d`。版本、依赖和验证结果见 [微信导出说明](docs/wechat_export.md)。
+首次按 [新 Mac 指南](docs/new_mac_setup.md) 完成资源导入和环境检查。日常关闭微信工程窗口后运行 `python3 tools/export_wechat.py`，再将生成的 `build/wechat/` 打开到微信开发者工具。AppID 已配置为 `wxd575463c13869e7d`。版本、依赖和验证结果见 [微信导出说明](docs/wechat_export.md)。

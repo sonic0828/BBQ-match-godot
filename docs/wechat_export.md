@@ -1,5 +1,9 @@
 # 微信小游戏导出
 
+新电脑从 [新 Mac 迁移与 Codex 交接指南](new_mac_setup.md) 开始。本页记录本仓库的实际导出方式和已遇到的故障；根目录《Godot导出微信小游戏指南.md》是初始路线参考，当前已有固定模板、维护脚本和回归测试，无需重复首次选型或重建最小演示工程。
+
+截至 2026-09-25：Android 曾由用户反馈能进入并操作；iPhone 16 Pro 在只读属性修复后仍出现空白，最新首帧诊断包的真机结果待反馈。以下历史验证记录不能作为 iPhone 已修复的结论。
+
 ## 本次交付
 
 - AppID：`wxd575463c13869e7d`；游戏名：烧烤串串消。
@@ -45,6 +49,8 @@ python3 tools/export_wechat.py
 ```text
 build/wechat/
 ├── game.js
+├── boot-diagnostics.js
+├── boot-options.js
 ├── game.json
 ├── project.config.json
 ├── weapp-adapter.js
@@ -66,6 +72,28 @@ build/wechat/
 本机开发者工具对 Emscripten 引擎执行二次压缩时，预览打包线程会退出。导出配置已关闭 SWC 和额外 JS 压缩，重新生成预览成功。关闭“忽略未使用文件”，保证动态加载的 WASM 和资源包被打入预览。
 
 微信启动文件将 `wx.onHide` / `wx.onShow` 转发到 Godot 适配层的失焦／聚焦事件，使用游戏现有的失焦暂停逻辑。存档沿用 `user://progress.cfg`，由模板文件系统适配持久化；当前音效均为短 WAV，继续通过 Godot 混音播放。
+
+## 构建排错速查
+
+| 表现 | 已确认原因或首先检查的事项 | 当前处理与验证 |
+| --- | --- | --- |
+| 新机缺 `.godot/`、找不到导入资源 | Git 不携带生成的导入缓存 | 打开 `project.godot` 等待导入，或运行 Godot `--headless --path . --import`，确认无资源／脚本错误 |
+| 为安装导出插件卡在 C++、Xcode 许可 | 进入了本项目未采用的编辑器插件编译路线 | 使用 `tools/export_wechat.py` 组装已发布模板；当前资源打包不依赖此插件或官方 Web 模板 |
+| 模板下载失败、SHA-256 不符或补丁匹配失败 | 网络、下载不完整或模板版本不符 | 核对脚本固定版本／校验值，重新取得匹配的原始文件；保留校验与精确补丁保护，不强行跳过 |
+| 平台测试找不到 `.tpz` | 测试读取默认缓存，而 `build/` 不在 Git 中 | 首次导出准备 `build/cache/minigame4.7.0.8.tpz` 后再测；自定义模板路径不会自动填充默认缓存 |
+| 手机找不到主资源包 | 曾直接使用 `.pck`，被微信包文件过滤 | 脚本将资源重命名为 `engine/bbq.bin`；核对入口路径与预览包是否包含该文件 |
+| 预览时打包线程退出 | 旧机对 Emscripten JS 二次压缩曾失败 | 保持脚本中的 `minified=false`、`swc=false`、`disableSWC=true`，重新预览确认成功 |
+| WASM／资源在本地存在，扫码却缺失 | 检查是否被当成“未使用文件”排除 | 保留 `ignoreUploadUnusedFiles=false`；核对预览包体和 engine 分包，不能只看本地目录 |
+| 导出后报 `module 'game.js' is not defined` | 工程目录替换后，工具可能仍缓存旧文件列表 | 导出前关闭该工程窗口，导出后重新打开；不以删除玩家存档作为常规处理 |
+| `module 'boot-options.json.js' is not defined` | 微信模块加载器无法按 Node.js 方式 require 该 JSON | 配置已改成导出脚本生成的 `boot-options.js`，通过 CommonJS 导出；核对正在打开最新产物 |
+| iOS `Attempted to assign to readonly property` | SDK 强制写入 DPR，与加载器只读 getter 冲突 | 保留 `sdk-preserve-device-pixel-ratio` 补丁；平台测试覆盖原错误及修复后初始化 |
+| 加载器已清理却又绘制／resize | 图片、进度和排队回调可晚于 cleanup 到达 | 保留 `loader-stop-after-cleanup` 补丁；回归测试验证清理后的回调不再绘制或改画布 |
+| 能看到加载页，但游戏空白 | 仅凭加载进度不能判断引擎、场景、首帧成功；具体原因仍需日志 | 用 `--diagnostics`，核对构建号、首帧、尺寸、GL 状态和错误，结合手机截图判断；不直接宣布渲染问题已修复 |
+| iPhone 调试二维码显示 Android | 本机 iOS 真机调试还要求 USB 和相应微信版本 | 可继续使用普通“预览”扫码诊断；需要 USB 调试时按工具当前提示连接，而非反复扫描 Android 调试码 |
+| 新 Mac 的 CLI 无法调用微信工具 | 登录、服务端口、调用授权属于本机状态 | 由用户完成该机登录和必要授权；手动预览可作为入口，不照搬旧端口号或旧登录状态 |
+| 普通构建打开了另一版游戏 | 同名原生 JS 工程和旧最小测试工程容易混淆 | 核对路径必须是当前 Godot 检出下的 `build/wechat/`；目录用途见新 Mac 指南 |
+
+排错应保留当前 Git 提交号、`build/wechat/export-info.json`、`build/wechat-export.log`、预览反馈和手机诊断截图。同一问题先沿记录中已验证的路径排查；只有版本、输入或代码发生相关变化时，才重做相应验证。
 
 ## 验证记录（2026-09-24）
 
