@@ -20,6 +20,7 @@ Promise.resolve()
             engine.init('/engine/godot'),
             engine.preloadFile('/engine/bbq.bin'),
         ]).then(() => {
+            boot.inspectRuntime(engine);
             boot.stage('资源就绪，正在创建游戏画面');
             loader.cleanup();
             return engine.start({ args: ['--main-pack', '/engine/bbq.bin'] });

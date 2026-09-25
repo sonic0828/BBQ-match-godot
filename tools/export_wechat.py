@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
+import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = '4.7.0.8'
@@ -94,9 +95,6 @@ def main():
         loader = stage / 'godot-loader.js'
         loader.write_text(patch_wechat_loader(loader.read_text()))
         build_id = datetime.now().strftime('%Y%m%d-%H%M%S')
-        (stage / 'boot-options.js').write_text('module.exports = ' + json.dumps({
-            'diagnostics': args.diagnostics, 'build': build_id,
-        }) + ';\n')
         config.update(appid=args.appid, projectname='烧烤串串消', description='烧烤串串消 · Godot 微信小游戏', isGameTourist=False)
         config['setting']['urlCheck'] = True
         # The engine is already generated/minified. Keep its dynamic binary
@@ -123,7 +121,11 @@ def main():
         if not pack.exists() or pack.stat().st_size < 100:
             raise SystemExit(f'Godot 未生成资源包，请检查 {log}')
         # WeChat's package file filter accepts .bin, but does not ship .pck.
-        pack.rename(stage / 'engine/bbq.bin')
+        pack = pack.rename(stage / 'engine/bbq.bin')
+        (stage / 'boot-options.js').write_text('module.exports = ' + json.dumps({
+            'diagnostics': args.diagnostics, 'build': build_id,
+            'pack': {'bytes': pack.stat().st_size, 'crc32': f'{zlib.crc32(pack.read_bytes()):08x}'},
+        }) + ';\n')
         sizes = {str(p.relative_to(stage)): p.stat().st_size for p in sorted(stage.rglob('*')) if p.is_file() and not p.name.startswith('.')}
         total = sum(sizes.values())
         write_json(stage / 'export-info.json', {

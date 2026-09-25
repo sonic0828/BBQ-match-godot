@@ -4,23 +4,91 @@ const { test } = require('node:test');
 const vm = require('node:vm');
 const installBootDiagnostics = require('../platform/wechat/boot-diagnostics.js');
 
-function fixture(t, options = {}) {
+function fixture(t, options = {}, flags = { isIOSHighPerformanceMode: true }) {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const handlers = {};
     const dialogs = [];
+    const clipboard = [];
     const wx = {
         getDeviceInfo: () => ({ platform: 'ios' }),
         getAppBaseInfo: () => ({ version: '8.0.78', SDKVersion: '3.17.3' }),
         showModal: options => dialogs.push(options),
+        setClipboardData: ({ data }) => clipboard.push(data),
         onError: callback => { handlers.error = callback; },
         offError: callback => { assert.equal(handlers.error, callback); delete handlers.error; },
         onUnhandledRejection: callback => { handlers.rejection = callback; },
         offUnhandledRejection: callback => { assert.equal(handlers.rejection, callback); delete handlers.rejection; },
     };
-    const root = { isIOSHighPerformanceMode: true };
+    const root = { ...flags };
     root.bbqBoot = installBootDiagnostics(wx, root, options);
-    return { root, handlers, dialogs };
+    return { root, handlers, dialogs, clipboard };
 }
+
+test('错误洪流保留最早记录和重复次数，只有点击复制才写剪贴板', t => {
+    const logged = [];
+    t.mock.method(console, 'error', (...args) => logged.push(args));
+    const { root, dialogs, clipboard } = fixture(t, { diagnostics: true });
+    root.bbqBoot.printError('original startup failure');
+    for (let i = 0; i < 1500; i++) root.bbqBoot.printError('repeated ObjectDB failure');
+    t.mock.timers.tick(30000);
+    assert.match(dialogs[0].content, /首次：original startup failure/);
+    assert.equal(logged.length, 2);
+    dialogs[0].success({ cancel: true });
+    assert.equal(clipboard.length, 0);
+    dialogs[0].success({ confirm: true });
+    const report = JSON.parse(clipboard[0]);
+    assert.equal(report.errorCount, 1501);
+    assert.equal(report.firstErrors[0].line, 'original startup failure');
+    assert.equal(report.errorStats[1].count, 1500);
+});
+
+for (const flags of [
+    { isIOSHighPerformanceMode: false, isIOSHighPerformanceModePlus: true },
+    { isIOSHighPerformanceMode: false, isIOSHighPerformanceModePlus: false },
+    {},
+]) {
+    test(`分别记录 iOS 高性能与 Plus 标志 ${JSON.stringify(flags)}`, t => {
+        const { dialogs, clipboard } = fixture(t, { diagnostics: true }, flags);
+        t.mock.timers.tick(30000);
+        dialogs[0].success({ confirm: true });
+        const report = JSON.parse(clipboard[0]);
+        assert.equal(report.highPerformance, flags.isIOSHighPerformanceMode ?? null);
+        assert.equal(report.highPerformancePlus, flags.isIOSHighPerformanceModePlus ?? null);
+        assert.equal(report.mode, flags.isIOSHighPerformanceModePlus ? '高性能 Plus 模式' : '普通模式');
+    });
+}
+
+for (const corrupted of [false, true]) {
+    test(`核对预加载资源字节与当前 WASM 内存，资源损坏 ${corrupted}`, t => {
+        const { root, dialogs, clipboard } = fixture(t, {
+            diagnostics: true, pack: { bytes: 9, crc32: 'cbf43926' },
+        });
+        const bytes = new Uint8Array([0, ...Buffer.from(corrupted ? '123456780' : '123456789'), 0]);
+        const engine = {
+            preloader: { preloadedFiles: [{ path: '/engine/bbq.bin', buffer: bytes.subarray(1, 10) }] },
+            rtenv: { HEAPU8: new Uint8Array(1024) },
+        };
+        root.bbqBoot.inspectRuntime(engine);
+        engine.rtenv.HEAPU8 = new Uint8Array(2048);
+        t.mock.timers.tick(30000);
+        dialogs[0].success({ confirm: true });
+        const report = JSON.parse(clipboard[0]);
+        assert.equal(report.runtime.pack.matches, !corrupted);
+        assert.equal(report.runtime.pack.bytes, 9);
+        assert.equal(report.runtime.wasmMemoryBytes, 2048);
+        assert.equal(engine.preloader.preloadedFiles.length, 1);
+    });
+}
+
+test('缺少运行时诊断字段不会阻止启动与首帧', t => {
+    const { root, handlers, dialogs } = fixture(t, { diagnostics: true });
+    root.bbqBoot.inspectRuntime({});
+    root.bbqBoot.ready();
+    root.bbqBoot.print('[BBQ first frame]');
+    t.mock.timers.tick(3000);
+    assert.match(dialogs[0].content, /首帧 已绘制/);
+    assert.deepEqual(handlers, {});
+});
 
 test('手机未处理的启动异常会显示错误与运行环境，重复上报只显示一次', t => {
     const { root, handlers, dialogs } = fixture(t);
