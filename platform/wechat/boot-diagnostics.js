@@ -69,12 +69,10 @@ module.exports = function installBootDiagnostics(wxApi, root, options = {}) {
         wxApi.showModal({
             title,
             content: `${options.build || ''}\n${environment}\n${mode()}\n${phase}\n引擎 ${engineStarted ? '已启动' : '未确认'} / 场景 ${scene || '未确认'} / 首帧 ${firstFrame ? '已绘制' : '未确认'}${rendering}${resource}${memory}\n${detail}\n错误 ${errorCount} 条；首次：${errors.length ? errors[0].line.slice(0, 400) : '无'}`,
-            showCancel: true,
-            cancelText: '关闭',
-            confirmText: '复制诊断',
-            success: result => {
-                if (result.confirm) wxApi.setClipboardData({ data: fullReport });
-            },
+            // Clipboard access requires a separate WeChat privacy declaration.
+            // Keep the complete report in vConsole without requesting that access.
+            showCancel: false,
+            confirmText: '知道了',
         });
         dispose();
     }

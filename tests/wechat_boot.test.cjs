@@ -8,12 +8,15 @@ function fixture(t, options = {}, flags = { isIOSHighPerformanceMode: true }) {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const handlers = {};
     const dialogs = [];
-    const clipboard = [];
+    const reports = [];
+    t.mock.method(console, 'log', (label, data) => {
+        if (label === '[BBQ startup report]') reports.push(JSON.parse(data));
+    });
     const wx = {
         getDeviceInfo: () => ({ platform: 'ios' }),
         getAppBaseInfo: () => ({ version: '8.0.78', SDKVersion: '3.17.3' }),
         showModal: options => dialogs.push(options),
-        setClipboardData: ({ data }) => clipboard.push(data),
+        setClipboardData: () => assert.fail('启动诊断不应依赖剪贴板隐私权限'),
         onError: callback => { handlers.error = callback; },
         offError: callback => { assert.equal(handlers.error, callback); delete handlers.error; },
         onUnhandledRejection: callback => { handlers.rejection = callback; },
@@ -21,22 +24,22 @@ function fixture(t, options = {}, flags = { isIOSHighPerformanceMode: true }) {
     };
     const root = { ...flags };
     root.bbqBoot = installBootDiagnostics(wx, root, options);
-    return { root, handlers, dialogs, clipboard };
+    return { root, handlers, dialogs, reports };
 }
 
-test('错误洪流保留最早记录和重复次数，只有点击复制才写剪贴板', t => {
+test('错误洪流后重新输出完整首错和次数，弹窗不调用需隐私声明的剪贴板', t => {
     const logged = [];
     t.mock.method(console, 'error', (...args) => logged.push(args));
-    const { root, dialogs, clipboard } = fixture(t, { diagnostics: true });
+    const { root, dialogs, reports } = fixture(t, { diagnostics: true });
     root.bbqBoot.printError('original startup failure');
     for (let i = 0; i < 1500; i++) root.bbqBoot.printError('repeated ObjectDB failure');
     t.mock.timers.tick(30000);
     assert.match(dialogs[0].content, /首次：original startup failure/);
     assert.equal(logged.length, 2);
-    dialogs[0].success({ cancel: true });
-    assert.equal(clipboard.length, 0);
-    dialogs[0].success({ confirm: true });
-    const report = JSON.parse(clipboard[0]);
+    assert.equal(dialogs[0].showCancel, false);
+    assert.equal(dialogs[0].confirmText, '知道了');
+    assert.equal(dialogs[0].success, undefined);
+    const report = reports[0];
     assert.equal(report.errorCount, 1501);
     assert.equal(report.firstErrors[0].line, 'original startup failure');
     assert.equal(report.errorStats[1].count, 1500);
@@ -48,10 +51,9 @@ for (const flags of [
     {},
 ]) {
     test(`分别记录 iOS 高性能与 Plus 标志 ${JSON.stringify(flags)}`, t => {
-        const { dialogs, clipboard } = fixture(t, { diagnostics: true }, flags);
+        const { reports } = fixture(t, { diagnostics: true }, flags);
         t.mock.timers.tick(30000);
-        dialogs[0].success({ confirm: true });
-        const report = JSON.parse(clipboard[0]);
+        const report = reports[0];
         assert.equal(report.highPerformance, flags.isIOSHighPerformanceMode ?? null);
         assert.equal(report.highPerformancePlus, flags.isIOSHighPerformanceModePlus ?? null);
         assert.equal(report.mode, flags.isIOSHighPerformanceModePlus ? '高性能 Plus 模式' : '普通模式');
@@ -60,7 +62,7 @@ for (const flags of [
 
 for (const corrupted of [false, true]) {
     test(`核对预加载资源字节与当前 WASM 内存，资源损坏 ${corrupted}`, t => {
-        const { root, dialogs, clipboard } = fixture(t, {
+        const { root, reports } = fixture(t, {
             diagnostics: true, pack: { bytes: 9, crc32: 'cbf43926' },
         });
         const bytes = new Uint8Array([0, ...Buffer.from(corrupted ? '123456780' : '123456789'), 0]);
@@ -71,8 +73,7 @@ for (const corrupted of [false, true]) {
         root.bbqBoot.inspectRuntime(engine);
         engine.rtenv.HEAPU8 = new Uint8Array(2048);
         t.mock.timers.tick(30000);
-        dialogs[0].success({ confirm: true });
-        const report = JSON.parse(clipboard[0]);
+        const report = reports[0];
         assert.equal(report.runtime.pack.matches, !corrupted);
         assert.equal(report.runtime.pack.bytes, 9);
         assert.equal(report.runtime.wasmMemoryBytes, 2048);
