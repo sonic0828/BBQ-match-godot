@@ -166,3 +166,16 @@ node --test tests/wechat_boot.test.cjs tests/wechat_sdk.test.cjs tests/wechat_lo
 另建的 `build/wechat-webgl-check/` 用于强制普通 WebGL 的本机对照，在修改前已能显示首页；它不代表 iOS 真机兼容结论，也不是手机本轮要扫描的工程。
 
 本轮验证：26 项 JavaScript 回归检查、18 项 Godot 页面／输入检查通过；重新导出成功。微信模拟器显示完整首页，诊断报告场景尺寸 `720×1558`、首帧已绘制、WebGL2 画布／缓冲均为 `1170×2532`、上下文未丢失、GL 错误为 0。普通预览二维码输出至 `build/wechat-ios-render-preview.png`；iPhone 仍需扫码并提供该包的诊断结果，不能用模拟器结果代替真机验收。
+
+## 新 Mac 诊断包验证（2026-09-25）
+
+- 源码基于 `cfc43f2`，按当前工作区导出；原有 `project.godot` 未提交修改保留并参与构建，本次没有修改游戏代码。
+- Godot `4.7.2.stable.official.ed1daf0bf`、Python `3.13.0`、Node.js `22.17.0`、Git `2.47.1`、curl `8.7.1`；微信开发者工具为 `2.02.2609231 RC`，与旧机 Stable 基线不同。
+- 完成首次资源导入，并使用固定 `minigame4.7.0.8.tpz` 和原 SHA-256 校验。导出命令：`python3 tools/export_wechat.py --godot /Applications/Godot.app/Contents/MacOS/Godot --diagnostics`。
+- 构建号 `20260925-101020`，AppID `wxd575463c13869e7d`，`diagnostics=true`，保留像素比例与加载器清理两项补丁。工程为 `build/wechat/`，压缩包为 `build/wechat.zip`；清单包体 `12,714,117` 字节（约 `12.13 MiB`），关键文件及 zip 内容检查通过。
+- 新机实际测试：核心规则 **78 项**（含 10 关自动通关）、页面／输入 **18 项**、微信启动／SDK／加载器 **26 项**，全部退出码为 0。Godot headless 测试仍有文档已记录的沙盒系统证书读取提示。
+- 通过界面导入当前检出下的微信工程，模拟器显示完整首页。诊断报告引擎已启动、场景 `720×1565`、首帧已绘制、WebGL2 画布／缓冲均为 `1206×2622`、上下文未丢失、GL 错误为 0。
+- RC 工具控制台另有 `worker path empty` 错误，堆栈指向开发者工具 `app.asar`；未阻止本次首页显示，原因和对真机调试的影响尚未确认。不能将本次模拟器记录描述为控制台零错误。
+- 本机 CLI 服务端口关闭，本次使用界面导入；后续 CLI 调用仍需完成本机端口及授权设置。
+- 真机调试包已打包，工具显示 `12833 KB`；当前二维码为 Android／鸿蒙，iOS 选项仍为灰色。界面提示 iOS 需微信 `8.0.61` 及以上并通过 USB 连接手机；尚未建立 iOS 调试会话，不将此二维码当作 iPhone 调试入口。
+- iPhone USB 调试、实际画面、触摸、音效和前后台行为仍待用户验收；本次构建通过不代表 iPhone 空白问题已解决。
