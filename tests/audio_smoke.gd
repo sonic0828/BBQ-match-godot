@@ -5,6 +5,12 @@ var app: Control
 var failures: Array[String] = []
 var checks = 0
 
+class ObservedAudio extends "res://scripts/core/game_audio.gd":
+	var sync_count = 0
+	func _sync_playback() -> void:
+		sync_count += 1
+		super._sync_playback()
+
 func _initialize() -> void:
 	run.call_deferred()
 
@@ -19,6 +25,9 @@ func run() -> void:
 	await process_frame
 	app.set_process(false)
 	check("乐" in app.font.get_supported_chars(), "music setting character is present in bundled font")
+	app.audio.queue_free()
+	app.audio = ObservedAudio.new()
+	app.add_child(app.audio)
 	var audio = app.audio
 	audio.set_process(false)
 	audio.enabled = true
@@ -31,6 +40,22 @@ func run() -> void:
 	await create_timer(0.15).timeout
 	# Native window focus can change during startup; begin the scenario foregrounded.
 	app._notification(NOTIFICATION_APPLICATION_FOCUS_IN)
+	var sync_count = audio.sync_count
+	var position = audio.music.get_playback_position()
+	for i in range(10):
+		app._input(press)
+		var mouse = InputEventMouseButton.new()
+		mouse.pressed = true
+		app._input(mouse)
+		app._input(InputEventMouseMotion.new())
+		app._input(InputEventScreenDrag.new())
+	check(audio.sync_count == sync_count, "repeated clicks and drags never send another audio resume request")
+	audio.set_backgrounded(false)
+	audio.set_game_paused(false)
+	audio.music_enabled = true
+	check(audio.sync_count == sync_count, "unchanged lifecycle and music settings never resend playback state")
+	await create_timer(0.15).timeout
+	check(audio.music.get_playback_position() > position, "music advances across repeated pointer input")
 	var music_playback = audio.music.get_stream_playback()
 	audio.music_enabled = false
 	audio.music_enabled = true

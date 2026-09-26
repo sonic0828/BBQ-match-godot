@@ -8,6 +8,8 @@ var enabled = true:
 			reset_effects()
 var music_enabled = true:
 	set(value):
+		if music_enabled == value:
+			return
 		music_enabled = value
 		_sync_playback()
 var players: Array[AudioStreamPlayer] = []
@@ -38,28 +40,37 @@ func _ready() -> void:
 
 func unlock() -> void:
 	# First pointer gesture also allows the host's audio context to resume.
+	if unlocked:
+		return
 	unlocked = true
 	_sync_playback()
 
 func set_backgrounded(value: bool) -> void:
+	if backgrounded == value:
+		return
 	backgrounded = value
 	_sync_playback()
 
 func set_game_paused(value: bool) -> void:
+	if game_paused == value:
+		return
 	game_paused = value
 	_sync_playback()
 
 func _sync_playback() -> void:
 	var suspended = backgrounded or game_paused
 	for player in players:
-		player.stream_paused = suspended
+		if player.stream_paused != suspended:
+			player.stream_paused = suspended
 	if music == null:
 		return
 	var can_play = unlocked and music_enabled and not suspended
 	if can_play and not music_started:
 		music.play()
 		music_started = true
-	music.stream_paused = not can_play
+	# The WeChat sample backend restarts its source on redundant unpause calls.
+	if music.stream_paused == can_play:
+		music.stream_paused = not can_play
 
 func _process(delta: float) -> void:
 	if backgrounded or game_paused:
