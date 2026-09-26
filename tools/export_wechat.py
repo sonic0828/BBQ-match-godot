@@ -96,7 +96,7 @@ def main():
         loader = stage / 'godot-loader.js'
         loader.write_text(patch_wechat_loader(loader.read_text()))
         build_id = datetime.now().strftime('%Y%m%d-%H%M%S')
-        config.update(appid=args.appid, projectname='烧烤串串消', description='烧烤串串消 · Godot 微信小游戏', isGameTourist=False)
+        config.update(appid=args.appid, projectname='烧烤消消消', description='烧烤消消消 · Godot 微信小游戏', isGameTourist=False)
         config['setting']['urlCheck'] = True
         # The engine is already generated/minified. Keep its dynamic binary
         # resources, and avoid running SWC/minification over the Emscripten glue.
@@ -112,6 +112,7 @@ def main():
         })
         shutil.copy2(ROOT / 'platform/wechat/game.js', stage / 'game.js')
         shutil.copy2(ROOT / 'platform/wechat/boot-diagnostics.js', stage / 'boot-diagnostics.js')
+        shutil.copy2(ROOT / 'platform/wechat/haptics.js', stage / 'haptics.js')
         shutil.copy2(ROOT / 'platform/wechat/THIRD_PARTY_NOTICES.txt', stage / 'THIRD_PARTY_NOTICES.txt')
         shutil.copy2(ROOT / 'platform/wechat/engine-entry.js', stage / 'engine/game.js')
         log = output.parent / 'wechat-export.log'

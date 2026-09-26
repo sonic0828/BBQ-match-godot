@@ -22,7 +22,8 @@ func run() -> void:
 	check(app.model.state == BoardModel.GameState.PLAYING, "actual mouse drag completes tutorial")
 	await create_timer(0.7).timeout
 	check(app.model.matches == 1, "input-routed move triggers match")
-	app._pause()
+	var pause_button = app.game_hud.get_node("PauseButton")
+	await click(pause_button.get_global_rect().get_center())
 	var before = app.model.remaining
 	await create_timer(0.1).timeout
 	check(app.model.remaining == before and app.modal != null, "pause modal freezes game")
@@ -61,6 +62,8 @@ func run() -> void:
 		var stage_end = app.stage.position + app.stage.size * app.stage.scale
 		check(safe_bounds.has_point(app.stage.position + Vector2.ONE) and safe_bounds.has_point(stage_end - Vector2.ONE), "stage fits %s window" % str(dimensions))
 		var source = app.board.get_global_transform_with_canvas() * app.board.slot_center(0, 2)
+		pause_button = app.game_hud.get_node("PauseButton")
+		check(pause_button.position.x < 60 and pause_button.position.x + pause_button.size.x < 132, "pause stays left of HUD numbers at %s" % str(dimensions))
 		var target = app.board.get_global_transform_with_canvas() * app.board.slot_center(1, 2)
 		await drag(source, target)
 		await create_timer(0.55).timeout
@@ -99,3 +102,12 @@ func drag(from: Vector2, to: Vector2) -> void:
 	release.position = to
 	root.push_input(release, true)
 	await process_frame
+
+func click(position: Vector2) -> void:
+	for pressed in [true, false]:
+		var event = InputEventMouseButton.new()
+		event.button_index = MOUSE_BUTTON_LEFT
+		event.pressed = pressed
+		event.position = position
+		root.push_input(event, true)
+		await process_frame

@@ -5,6 +5,7 @@ import './godot-loader'
 
 const installBootDiagnostics = require('./boot-diagnostics');
 GameGlobal.bbqBoot = installBootDiagnostics(wx, GameGlobal, require('./boot-options'));
+GameGlobal.bbqHaptics = require('./haptics')(wx);
 
 // All current effects are short WAVs mixed by Godot, with no external audio CDN.
 GameGlobal.__godotMinigameNativeAudioMinDurationSeconds = Number.MAX_SAFE_INTEGER;

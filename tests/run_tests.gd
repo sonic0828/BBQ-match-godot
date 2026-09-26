@@ -143,21 +143,45 @@ func _test_timer_pause_and_chain() -> void:
 func _test_storage() -> void:
 	var path = "/private/tmp/hotpot-test-progress.cfg"
 	var store = SaveStore.new()
+	var missing_path = "/private/tmp/bbq-new-player-%d.cfg" % Time.get_ticks_usec()
+	store.load_progress(missing_path)
+	check(store.music_enabled and store.audio_enabled and store.vibration_enabled, "new players default to music, effects and vibration enabled")
 	store.highest_unlocked = 6
 	store.completed = [1, 2, 3, 4, 5]
 	store.last_selected = 4
 	store.audio_enabled = false
+	store.music_enabled = false
+	store.vibration_enabled = false
 	check(store.save_progress(path) == OK, "local settings save")
 	var reloaded = SaveStore.new()
 	reloaded.load_progress(path)
 	check(reloaded.highest_unlocked == 6 and reloaded.completed.size() == 5 and not reloaded.audio_enabled, "local progress and sound survive reload")
+	check(not reloaded.music_enabled and not reloaded.vibration_enabled, "existing players keep their saved disabled settings")
 	var broken = ConfigFile.new()
 	broken.set_value("progress", "highestUnlockedLevel", 999)
 	broken.set_value("progress", "completedLevels", "bad")
 	broken.save(path)
 	reloaded.load_progress(path)
 	check(reloaded.highest_unlocked == 10 and reloaded.completed.is_empty(), "out-of-range and malformed save data sanitized")
+	check(reloaded.music_enabled and reloaded.audio_enabled and reloaded.vibration_enabled, "missing settings fields default to all enabled")
 	DirAccess.remove_absolute(path)
+	var legacy_root = "/private/tmp/bbq-rename-%d" % Time.get_ticks_usec()
+	for old_name in SaveStore.LEGACY_NAMES:
+		var directory = legacy_root.path_join(old_name)
+		DirAccess.make_dir_recursive_absolute(directory)
+		store.save_progress(directory.path_join("progress.cfg"))
+	var previous = legacy_root.path_join(SaveStore.LEGACY_NAMES[0]).path_join("progress.cfg")
+	check(store._legacy_path(legacy_root) == previous, "renaming prefers the most recent application's save")
+	var migrated = SaveStore.new()
+	migrated.load_progress(store._legacy_path(legacy_root))
+	check(migrated.highest_unlocked == 6 and not migrated.vibration_enabled and not migrated.music_enabled, "renamed application reads old progress and preferences")
+	DirAccess.remove_absolute(previous)
+	check(store._legacy_path(legacy_root).contains(SaveStore.LEGACY_NAMES[1]), "older prototype remains a migration fallback")
+	for old_name in SaveStore.LEGACY_NAMES:
+		var directory = legacy_root.path_join(old_name)
+		DirAccess.remove_absolute(directory.path_join("progress.cfg"))
+		DirAccess.remove_absolute(directory)
+	DirAccess.remove_absolute(legacy_root)
 
 func _test_playthroughs() -> void:
 	for number in range(1, 11):

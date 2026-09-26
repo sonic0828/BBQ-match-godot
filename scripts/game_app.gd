@@ -11,6 +11,7 @@ var page: Control
 var modal: Control
 var board: BoardView
 var audio: Node
+var haptics: Node
 var font: Font
 var current_page = "home"
 var timer_label: Label
@@ -43,6 +44,9 @@ func _ready() -> void:
 	add_child(audio)
 	audio.enabled = save.audio_enabled
 	audio.music_enabled = save.music_enabled
+	haptics = preload("res://scripts/core/game_haptics.gd").new()
+	add_child(haptics)
+	haptics.enabled = save.vibration_enabled
 	var background = TextureRect.new()
 	background.texture = load("res://assets/art/night_market.png")
 	background.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -145,11 +149,15 @@ func _notification(what: int) -> void:
 	if what in [NOTIFICATION_APPLICATION_FOCUS_OUT, NOTIFICATION_APPLICATION_PAUSED]:
 		if audio != null:
 			audio.set_backgrounded(true)
+		if haptics != null:
+			haptics.set_backgrounded(true)
 		if current_page == "game" and model != null and model.active():
 			_pause()
 	elif what in [NOTIFICATION_APPLICATION_FOCUS_IN, NOTIFICATION_APPLICATION_RESUMED]:
 		if audio != null:
 			audio.set_backgrounded(false)
+		if haptics != null:
+			haptics.set_backgrounded(false)
 
 func _input(event: InputEvent) -> void:
 	if (event is InputEventMouseButton or event is InputEventScreenTouch) and event.pressed:
@@ -169,6 +177,8 @@ func _new_page(name_value: String) -> void:
 	pending_win = false
 	audio.reset_effects()
 	audio.set_game_paused(false)
+	haptics.reset()
+	haptics.set_game_paused(false)
 	_close_modal()
 	if page != null:
 		stage.remove_child(page)
@@ -187,7 +197,7 @@ func _show_home() -> void:
 	_new_page("home")
 	_button(page, "设置", Rect2(566, 48, 110, 58), _show_settings, false, 24)
 	_label(page, "人 间 烟 火  ·  一 串 入 魂", Rect2(60, 148, 600, 38), 23, GOLD)
-	var title = _label(page, "烧烤串串消", Rect2(30, 206, 660, 112), 76, CREAM)
+	var title = _label(page, "烧烤消消消", Rect2(30, 206, 660, 112), 76, CREAM)
 	title.add_theme_constant_override("outline_size", 12)
 	title.add_theme_color_override("font_outline_color", Color("582517"))
 	_label(page, "把喜欢的味道，串在一起。", Rect2(50, 330, 620, 42), 28, CREAM)
@@ -254,7 +264,7 @@ func _start_level(number: int) -> void:
 	_panel(game_hud, Rect2(466, 12, 124, 55), Color(0.10, 0.18, 0.25, 0.68), 13, Color(0.62, 0.74, 0.80, 0.25))
 	progress_label = _label(game_hud, "0/5", Rect2(468, 12, 120, 55), 34, CREAM)
 	_hud_number_style(progress_label)
-	var pause_button = _texture_button(game_hud, preload("res://assets/ui/pause.svg"), Rect2(609, 0, 82, 82))
+	var pause_button = _texture_button(game_hud, preload("res://assets/ui/pause.svg"), Rect2(29, 0, 82, 82))
 	pause_button.name = "PauseButton"
 	pause_button.pressed.connect(_pause)
 	hint_panel = _panel(page, Rect2(42, 0, 636, 44), Color(0.06, 0.12, 0.13, 0.78), 14)
@@ -332,9 +342,15 @@ func _update_hud(delta: float) -> void:
 
 func _on_model_event(kind: String, detail: Dictionary) -> void:
 	match kind:
-		"started": audio.reset_effects()
-		"paused": audio.set_game_paused(true)
-		"resumed": audio.set_game_paused(false)
+		"started":
+			audio.reset_effects()
+			haptics.reset()
+		"paused":
+			audio.set_game_paused(true)
+			haptics.set_game_paused(true)
+		"resumed":
+			audio.set_game_paused(false)
+			haptics.set_game_paused(false)
 		"pick", "cancel": audio.play(kind)
 		"refill": audio.refill(model.grills[detail.grill].refill_foods.size())
 		"transfer":
@@ -342,8 +358,7 @@ func _on_model_event(kind: String, detail: Dictionary) -> void:
 			audio.schedule("swap" if detail.swap else "drop", 0.16)
 		"match":
 			audio.match_food(detail.combo)
-			if save.vibration_enabled and (OS.has_feature("android") or OS.has_feature("ios")):
-				Input.vibrate_handheld(22)
+			haptics.match_food(detail.combo, detail.double)
 			combo_label.text = "双重消除！  连消 ×%d" % detail.combo if detail.double else ("好香！  连消 ×%d" % detail.combo if detail.combo > 1 else "滋啦～  美味出炉！")
 			combo_until = model.clock + 1.2
 		"refill_tip":
@@ -357,6 +372,7 @@ func _on_model_event(kind: String, detail: Dictionary) -> void:
 			pending_win = true
 		"fail":
 			audio.reset_effects()
+			haptics.reset()
 			audio.play("fail")
 			_show_result(false)
 
@@ -396,6 +412,8 @@ func _settings_buttons(parent: Control, y: float) -> void:
 	var vibration_button = _button(parent, "震动 " + ("开" if save.vibration_enabled else "关"), Rect2(366, y, 148, 70), func(): pass, false, 23)
 	vibration_button.pressed.connect(func():
 		save.vibration_enabled = not save.vibration_enabled
+		haptics.enabled = save.vibration_enabled
+		haptics.preview()
 		vibration_button.text = "震动 " + ("开" if save.vibration_enabled else "关")
 		save.save_progress())
 	_label(parent, "震动将在支持的移动设备上生效", Rect2(45, y + 88, 466, 35), 19, MUTED)

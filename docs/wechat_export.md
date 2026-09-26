@@ -1,12 +1,18 @@
 # 微信小游戏导出
 
+## 轻震反馈（2026-09-26）
+
+小游戏带 `wechat` 特征，不能用原生 `ios`／`android` 特征来决定是否震动；固定模板的 Web `navigator` 也没有震动适配。现由 `game_haptics.gd` 通过 `JavaScriptBridge.get_interface("bbqHaptics")` 调用入口安装的 `platform/wechat/haptics.js`，使用 `wx.vibrateShort({type: 'light'})`。导出脚本同时复制该桥接文件。
+
+参数依据[微信官方小游戏 API 类型定义](https://github.com/wechat-miniprogram/minigame-api-typings/blob/master/types/wx/lib.wx.api.d.ts)。同一成盘批次合并为 1～3 次轻短震，间隔 120 ms；后台、暂停、关闭震动、失败或离开对局会丢弃待播反馈。设备不支持时只记录一次提示，不升级为长震或强震。设置里重新开启震动会立即轻震一下，便于真机确认；模拟器调用成功不代表手机马达验收通过。
+
 新电脑从 [新 Mac 迁移与 Codex 交接指南](new_mac_setup.md) 开始。本页记录本仓库的实际导出方式和已遇到的故障；根目录《Godot导出微信小游戏指南.md》是初始路线参考，当前已有固定模板、维护脚本和回归测试，无需重复首次选型或重建最小演示工程。
 
 截至 2026-09-25：Android 曾由用户反馈能进入并操作；iPhone 16 Pro 已真机确认首页正常。后台开通高性能模式后，手机仍曾沿用普通模式；彻底退出并重启微信后，同一包进入高性能 Plus 模式，场景与首帧正常、启动错误为 0。手机完整玩法、音效和前后台验收仍待完成；下方失败记录保留排查过程。
 
 ## 本次交付
 
-- AppID：`wxd575463c13869e7d`；游戏名：烧烤串串消。
+- AppID：`wxd575463c13869e7d`；游戏名：烧烤消消消。
 - 工程固定为 `build/wechat/`，每次覆盖生成；默认不生成压缩包，用户明确需要时才用 `--zip` 生成 `build/wechat.zip`。
 - GIF／MP4 等功能演示另存 `build/previews/YYYY-MM-DD/<功能名>/`，不得混入微信工程；同日同功能多次迭代时加构建号区分。
 - 导入微信开发者工具时选择 **`build/wechat`**，不要选择 Godot 项目根目录。
