@@ -1,6 +1,7 @@
 # 素材记录
 
 - `assets/art/foods.png`：用户提供的图 3，透明食材 Sprite 原图。`FoodArt` 使用 AtlasTexture 区域取图；未重绘或改变食材原图。
+- `assets/art/food-combo-sprite.png`：用户于 2026-09-26 提供的透明成盘图集，原样复制。`FoodArt.COMBO_REGIONS` 对应当前全部 8 种食材（L/C/J/S/W/M/E/O），共用一张纹理；成盘使用位移、缩放、透明度和程序绘制星芒，不使用逐帧图片序列。
 - `assets/art/grill.png`：用户提供的图 4，透明烤架原图。保留原图，通过 AtlasTexture 跳过外围留白。
 - 用户图 1、图 2 作为风格与构图参考，未把带按钮的完整参考界面当作运行界面。
 - `assets/art/night_market.png`：本次通过内置 imagegen 工具生成的背景，已复制进项目。

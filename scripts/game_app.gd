@@ -28,6 +28,7 @@ var last_warning = -1
 var ui_clock = 0.0
 var capture_path = ""
 var capture_frames = 0
+var pending_win = false
 
 func _ready() -> void:
 	font = load("res://assets/fonts/game.ttf")
@@ -121,6 +122,10 @@ func _process(delta: float) -> void:
 	if current_page == "game":
 		model.tick(delta)
 		_update_hud(delta)
+		if pending_win and not board.has_combo_animations():
+			pending_win = false
+			audio.play("win")
+			_show_result(true)
 	if not capture_path.is_empty():
 		capture_frames += 1
 		if capture_frames == 12:
@@ -151,6 +156,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_show_home()
 
 func _new_page(name_value: String) -> void:
+	pending_win = false
 	_close_modal()
 	if page != null:
 		stage.remove_child(page)
@@ -330,8 +336,7 @@ func _on_model_event(kind: String, detail: Dictionary) -> void:
 			toast_until = model.clock + 2
 		"win":
 			save.complete_level(model.level)
-			audio.play("win")
-			_show_result(true)
+			pending_win = true
 		"fail":
 			audio.play("fail")
 			_show_result(false)

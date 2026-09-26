@@ -57,9 +57,9 @@ func start(config: Dictionary) -> void:
 			"elapsed": 0.0, "version": 0, "refill_foods": []})
 	total_matches = total / 3
 	state = GameState.TUTORIAL if tutorial in ["MOVE", "SWAP"] else GameState.PLAYING
+	event.emit("started", {})
 	for index in range(grills.size()):
 		_resolve(index)
-	event.emit("started", {})
 
 func active() -> bool:
 	return state in [GameState.PLAYING, GameState.TUTORIAL]
