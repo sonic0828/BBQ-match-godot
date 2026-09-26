@@ -62,6 +62,7 @@ def main():
     parser.add_argument('--project', type=Path, default=ROOT)
     parser.add_argument('--preset', default='WeChat Resources')
     parser.add_argument('--output', type=Path, default=ROOT / 'build/wechat')
+    parser.add_argument('--zip', action='store_true', help='额外生成 ZIP 压缩包；仅在明确需要时使用')
     parser.add_argument('--diagnostics', action='store_true', help='启动后显示真机渲染诊断；仅用于排查预览包')
     args = parser.parse_args()
     if len(args.appid) != 18 or not args.appid.startswith('wx'):
@@ -141,8 +142,10 @@ def main():
                 raise SystemExit(f'输出目录不是本脚本生成的目录，已保留：{output}')
             shutil.rmtree(output)
         shutil.copytree(stage, output)
-    zip_path = Path(shutil.make_archive(str(output), 'zip', output))
-    print(f'微信工程：{output}\n压缩包：{zip_path}\n包体：{total / 1024 / 1024:.2f} MiB')
+    print(f'微信工程：{output}\n包体：{total / 1024 / 1024:.2f} MiB')
+    if args.zip:
+        zip_path = Path(shutil.make_archive(str(output), 'zip', output))
+        print(f'压缩包：{zip_path}')
 
 
 if __name__ == '__main__':

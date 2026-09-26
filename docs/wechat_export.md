@@ -7,7 +7,8 @@
 ## 本次交付
 
 - AppID：`wxd575463c13869e7d`；游戏名：烧烤串串消。
-- 工程：`build/wechat/`，压缩包：`build/wechat.zip`。
+- 工程固定为 `build/wechat/`，每次覆盖生成；默认不生成压缩包，用户明确需要时才用 `--zip` 生成 `build/wechat.zip`。
+- GIF／MP4 等功能演示另存 `build/previews/YYYY-MM-DD/<功能名>/`，不得混入微信工程；同日同功能多次迭代时加构建号区分。
 - 导入微信开发者工具时选择 **`build/wechat`**，不要选择 Godot 项目根目录。
 - 竖屏、Compatibility、单线程；十关资源、中文字体和短音效均在本地包内。
 - 构建目录被 Git 忽略，提交的是导出脚本、启动配置和说明。
@@ -43,6 +44,8 @@ python3 tools/export_wechat.py
 首次下载模板到 `build/cache/`，后续复用本地缓存，使用前仍校验 SHA-256。可通过 `--godot /path/to/godot` 指定引擎，通过 `--template /path/to/minigame4.7.0.8.tpz` 使用已有模板，通过 `--appid wx...` 指定其他小游戏。
 
 脚本将替换其先前生成的 `build/wechat/`，因此不要直接在构建目录维护代码。启动逻辑编辑 `platform/wechat/game.js`，资源过滤编辑 `export_presets.cfg` 的 `WeChat Resources` 预设。
+
+仅在用户明确要求压缩包时执行 `python3 tools/export_wechat.py --zip`。普通导出不会生成或更新 ZIP。下文历史验证记录中曾生成的 ZIP 不代表当前默认行为。
 
 输出结构：
 

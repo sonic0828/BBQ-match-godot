@@ -73,3 +73,5 @@ macOS 默认目录：`~/Library/Application Support/Godot/app_userdata/烧烤串
 ## 微信小游戏导出
 
 首次按 [新 Mac 指南](docs/new_mac_setup.md) 完成资源导入和环境检查。日常关闭微信工程窗口后运行 `python3 tools/export_wechat.py`，再将生成的 `build/wechat/` 打开到微信开发者工具。AppID 已配置为 `wxd575463c13869e7d`。版本、依赖和验证结果见 [微信导出说明](docs/wechat_export.md)。
+
+微信工程始终覆盖 `build/wechat/`，默认不生成 ZIP；仅在明确需要压缩包时添加 `--zip`。功能演示 GIF／MP4 另存 `build/previews/YYYY-MM-DD/<功能名>/`，不放入微信工程。

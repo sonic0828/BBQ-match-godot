@@ -69,6 +69,13 @@
 - `tests/ui_smoke.gd`：18 项真实场景输入／导航检查通过，涵盖三种窗口尺寸。修正亚像素星芒的退化多边形后，未再出现绘制错误。
 - `tests/combo_animation.gd`：48 项动效与生命周期检查通过；原生 Compatibility 渲染模式另外验证完整时间轴推进，共 49 项。已逐帧检查 720×1280 窗口中的 8 种成盘和补位，包含密集三行棋盘。
 - 可复现预览：`Godot --path . --script tests/combo_animation.gd -- --test-session --capture-combo=/private/tmp/bbq-combo-frames`。该显式录制模式逐帧推进演示场景并保存 PNG，不改变正式关卡数据。
-- 独立微信验收工程：`build/combo-preview/wechat`，压缩包 `build/combo-preview/wechat.zip`，导出成功（约 14.00 MiB）。导出日志确认新图集已入包；资源包在本地 Godot headless 模式下进入第 3 关，无脚本或资源加载错误。该检查不代表微信宿主渲染验收。
-- 预览视频及 GIF 位于 `build/combo-preview/combo-animation.mp4` 和 `.gif`，是本地实际渲染画面的 8 种食材并行动效演示；构建产物不提交。
+- 首次曾导出到 `build/combo-preview/wechat` 并生成 ZIP（约 14.00 MiB 工程），现已移至 `build/archives/2026-09-26/combo-preview/` 留档，后续统一使用 `build/wechat/`。该次导出日志确认新图集已入包；资源包在本地 Godot headless 模式下进入第 3 关，无脚本或资源加载错误。该检查不代表微信宿主渲染验收。
+- 预览视频及 GIF 已归档到 `build/previews/2026-09-26/food-combo/combo-animation.mp4` 和 `.gif`，是本地实际渲染画面的 8 种食材并行动效演示；构建产物不提交。
 - 原生渲染／导出日志无错误；沙盒 headless 检查仍有既有 macOS 系统证书读取提示，未影响离线检查。未重新上传微信预览，本次新增动效的 iPhone 真机表现和性能仍待验收。
+
+## 2026-09-26 固定导出目录与演示归档
+
+- 已将固定覆盖 `build/wechat/`、默认不生成 ZIP、演示按日期／功能归档写入 `AGENTS.md` 和构建文档。脚本新增显式 `--zip` 开关，普通命令不生成或更新 ZIP。
+- 普通构建 `20260926-180037` 导出成功，工程 14,680,629 字节；`build/wechat.zip` 不存在，工程内不含 GIF／MP4／ZIP。旧 ZIP 与独立导出已保存在 `build/archives/2026-09-26/`，演示保存在 `build/previews/2026-09-26/food-combo/`。
+- 已核对构建清单大小和资源 CRC32，资源包 SHA-256 与前次通过验证的成盘版本一致，因此复用游戏规则和动效测试结果。
+- 关闭当前烧烤工程后覆盖导出，再重新打开同一 `build/wechat/`。模拟器确认最新构建号、场景就绪、首帧及首页显示，启动错误 0 条；两条现有提示分别为平台 HarmonyOS 接口提示与 ScriptProcessorNode 弃用警告。未生成新的手机预览二维码。

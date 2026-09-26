@@ -108,7 +108,8 @@ shasum -a 256 build/cache/minigame4.7.0.8.tpz
 | `build/wechat/engine/bbq.bin` | Godot 资源包，内部是 PCK |
 | `build/wechat/engine/godot.wasm.br` | 固定微信内核 |
 | `build/wechat/export-info.json` | 模板校验值、编辑器版本、补丁、构建编号和文件大小 |
-| `build/wechat.zip` | 完整导出包 |
+| `build/wechat.zip` | 仅在用户明确要求并添加 `--zip` 时生成 |
+| `build/previews/YYYY-MM-DD/<功能名>/` | GIF／MP4 等演示文件，独立于微信工程 |
 | `build/wechat-export.log` | Godot 资源导出日志 |
 
 用构建清单核对：AppID 为 `wxd575463c13869e7d`，普通构建 `diagnostics` 为 `false`，`runtime_patches` 包含 `sdk-preserve-device-pixel-ratio` 与 `loader-stop-after-cleanup`。
@@ -148,6 +149,8 @@ BBQ_WXCLI="/Applications/wechatwebdevtools.app/Contents/MacOS/cli"
 ## 6. 日常更新与空白页诊断
 
 日常顺序：同步仓库 → Godot 修改并验证 → 关闭微信工程窗口 → 导出 → 重新打开 `build/wechat/` → 编译和预览 → 手机验证。保留 `build/cache/` 可以复用模板；`build/wechat/` 会被脚本重新生成。修改导出产物会在下次构建时丢失，应修改 `platform/wechat/` 或导出脚本中的维护源。
+
+所有微信构建统一覆盖 `build/wechat/`，不要按功能另设输出目录。默认不生成 ZIP，用户明确要求时才添加 `--zip`。功能演示按日期和功能名保存到 `build/previews/`，同日重复迭代可追加构建号；不要将演示文件放入微信工程。
 
 普通导出：
 
