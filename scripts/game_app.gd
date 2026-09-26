@@ -42,6 +42,7 @@ func _ready() -> void:
 	audio = preload("res://scripts/core/game_audio.gd").new()
 	add_child(audio)
 	audio.enabled = save.audio_enabled
+	audio.music_enabled = save.music_enabled
 	var background = TextureRect.new()
 	background.texture = load("res://assets/art/night_market.png")
 	background.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -142,8 +143,17 @@ func _capture() -> void:
 
 func _notification(what: int) -> void:
 	if what in [NOTIFICATION_APPLICATION_FOCUS_OUT, NOTIFICATION_APPLICATION_PAUSED]:
+		if audio != null:
+			audio.set_backgrounded(true)
 		if current_page == "game" and model != null and model.active():
 			_pause()
+	elif what in [NOTIFICATION_APPLICATION_FOCUS_IN, NOTIFICATION_APPLICATION_RESUMED]:
+		if audio != null:
+			audio.set_backgrounded(false)
+
+func _input(event: InputEvent) -> void:
+	if (event is InputEventMouseButton or event is InputEventScreenTouch) and event.pressed:
+		audio.unlock()
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
@@ -157,6 +167,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 func _new_page(name_value: String) -> void:
 	pending_win = false
+	audio.reset_effects()
+	audio.set_game_paused(false)
 	_close_modal()
 	if page != null:
 		stage.remove_child(page)
@@ -320,10 +332,16 @@ func _update_hud(delta: float) -> void:
 
 func _on_model_event(kind: String, detail: Dictionary) -> void:
 	match kind:
-		"pick", "cancel", "refill": audio.play(kind)
-		"transfer": audio.play("swap" if detail.swap else "drop")
+		"started": audio.reset_effects()
+		"paused": audio.set_game_paused(true)
+		"resumed": audio.set_game_paused(false)
+		"pick", "cancel": audio.play(kind)
+		"refill": audio.refill(model.grills[detail.grill].refill_foods.size())
+		"transfer":
+			audio.play("move")
+			audio.schedule("swap" if detail.swap else "drop", 0.16)
 		"match":
-			audio.play("combo" if detail.combo > 1 else "match")
+			audio.match_food(detail.combo)
 			if save.vibration_enabled and (OS.has_feature("android") or OS.has_feature("ios")):
 				Input.vibrate_handheld(22)
 			combo_label.text = "双重消除！  连消 ×%d" % detail.combo if detail.double else ("好香！  连消 ×%d" % detail.combo if detail.combo > 1 else "滋啦～  美味出炉！")
@@ -338,6 +356,7 @@ func _on_model_event(kind: String, detail: Dictionary) -> void:
 			save.complete_level(model.level)
 			pending_win = true
 		"fail":
+			audio.reset_effects()
 			audio.play("fail")
 			_show_result(false)
 
@@ -361,17 +380,23 @@ func _show_settings() -> void:
 	_button(content, "好，知道啦", Rect2(62, 343, 432, 76), _close_modal, true)
 
 func _settings_buttons(parent: Control, y: float) -> void:
-	var sound_button = _button(parent, "音效  " + ("开" if save.audio_enabled else "关"), Rect2(62, y, 204, 70), func(): pass, false, 24)
+	var music_button = _button(parent, "音乐 " + ("开" if save.music_enabled else "关"), Rect2(42, y, 148, 70), func(): pass, false, 23)
+	music_button.pressed.connect(func():
+		save.music_enabled = not save.music_enabled
+		audio.music_enabled = save.music_enabled
+		music_button.text = "音乐 " + ("开" if save.music_enabled else "关")
+		save.save_progress())
+	var sound_button = _button(parent, "音效 " + ("开" if save.audio_enabled else "关"), Rect2(204, y, 148, 70), func(): pass, false, 23)
 	sound_button.pressed.connect(func():
 		save.audio_enabled = not save.audio_enabled
 		audio.enabled = save.audio_enabled
-		sound_button.text = "音效  " + ("开" if save.audio_enabled else "关")
+		sound_button.text = "音效 " + ("开" if save.audio_enabled else "关")
 		save.save_progress()
 		audio.play("pick"))
-	var vibration_button = _button(parent, "震动  " + ("开" if save.vibration_enabled else "关"), Rect2(290, y, 204, 70), func(): pass, false, 24)
+	var vibration_button = _button(parent, "震动 " + ("开" if save.vibration_enabled else "关"), Rect2(366, y, 148, 70), func(): pass, false, 23)
 	vibration_button.pressed.connect(func():
 		save.vibration_enabled = not save.vibration_enabled
-		vibration_button.text = "震动  " + ("开" if save.vibration_enabled else "关")
+		vibration_button.text = "震动 " + ("开" if save.vibration_enabled else "关")
 		save.save_progress())
 	_label(parent, "震动将在支持的移动设备上生效", Rect2(45, y + 88, 466, 35), 19, MUTED)
 

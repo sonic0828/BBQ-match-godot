@@ -74,7 +74,7 @@ build/wechat/
 
 本机开发者工具对 Emscripten 引擎执行二次压缩时，预览打包线程会退出。导出配置已关闭 SWC 和额外 JS 压缩，重新生成预览成功。关闭“忽略未使用文件”，保证动态加载的 WASM 和资源包被打入预览。
 
-微信启动文件将 `wx.onHide` / `wx.onShow` 转发到 Godot 适配层的失焦／聚焦事件，使用游戏现有的失焦暂停逻辑。存档沿用 `user://progress.cfg`，由模板文件系统适配持久化；当前音效均为短 WAV，继续通过 Godot 混音播放。
+微信启动文件将 `wx.onHide` / `wx.onShow` 转发到 Godot 适配层的失焦／聚焦事件，使用游戏现有的失焦暂停逻辑。存档沿用 `user://progress.cfg`，由模板文件系统适配持久化。短音效为 WAV／QOA，循环背景音乐为 Ogg Vorbis，由 Godot 混音；首次触摸后启播，切后台时暂停，音乐和音效分别保存开关。
 
 ## 构建排错速查
 

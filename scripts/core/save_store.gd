@@ -7,6 +7,7 @@ var highest_unlocked = 1
 var completed: Array = []
 var last_selected = 1
 var audio_enabled = true
+var music_enabled = true
 var vibration_enabled = true
 
 func load_progress(path: String = "") -> void:
@@ -29,6 +30,8 @@ func load_progress(path: String = "") -> void:
 			if entry is int and entry >= 1 and entry <= 10 and entry not in completed:
 				completed.append(entry)
 	audio_enabled = bool(config.get_value("settings", "audioEnabled", true))
+	# Existing players who muted sound should not hear new music after upgrading.
+	music_enabled = bool(config.get_value("settings", "musicEnabled", audio_enabled))
 	vibration_enabled = bool(config.get_value("settings", "vibrationEnabled", true))
 	if migrating:
 		save_progress(path)
@@ -41,6 +44,7 @@ func save_progress(path: String = "") -> Error:
 	config.set_value("progress", "completedLevels", completed)
 	config.set_value("progress", "lastSelectedLevel", last_selected)
 	config.set_value("settings", "audioEnabled", audio_enabled)
+	config.set_value("settings", "musicEnabled", music_enabled)
 	config.set_value("settings", "vibrationEnabled", vibration_enabled)
 	var result = config.save(path)
 	if result != OK:

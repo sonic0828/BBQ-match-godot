@@ -15,7 +15,7 @@ const COMBO_REGIONS = {
 }
 static var textures: Dictionary = {}
 static var combo_textures: Dictionary = {}
-static var grill_texture: AtlasTexture
+static var grill_texture: Texture2D
 
 static func food(id: String) -> Texture2D:
 	if not textures.has(id):
@@ -37,8 +37,5 @@ static func combo(id: String) -> Texture2D:
 
 static func grill() -> Texture2D:
 	if grill_texture == null:
-		grill_texture = AtlasTexture.new()
-		grill_texture.atlas = load("res://assets/art/grill.png")
-		grill_texture.region = Rect2(89, 285, 1078, 692)
-		grill_texture.filter_clip = true
+		grill_texture = load("res://assets/art/grill.png")
 	return grill_texture
