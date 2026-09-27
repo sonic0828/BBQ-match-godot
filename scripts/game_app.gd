@@ -30,6 +30,16 @@ var ui_clock = 0.0
 var capture_path = ""
 var capture_frames = 0
 var pending_win = false
+var run_id = -1
+var win_reward = false
+var bag_button: TextureButton
+var bag_badge: Label
+var bag_mode = ""
+var bag_teaching = false
+var bag_dialog: BagDialog
+var center_toast: Panel
+var center_toast_until = 0.0
+var daily_check = 0.0
 
 func _ready() -> void:
 	font = load("res://assets/fonts/game.ttf")
@@ -115,7 +125,7 @@ func _layout_game() -> void:
 	var top = height * 0.266
 	var available_height = bottom_ui.position.y - 24 - top
 	board.scale = Vector2.ONE
-	if model.grills.size() == 10:
+	if model.grills.size() >= 10:
 		# Four rows, including the isolated covered grill. Scale only on short screens.
 		top = hint_panel.position.y + 96
 		available_height = bottom_ui.position.y - 24 - top
@@ -131,6 +141,15 @@ func _layout_game() -> void:
 
 func _process(delta: float) -> void:
 	ui_clock += delta
+	if is_instance_valid(center_toast) and ui_clock >= center_toast_until:
+		center_toast.queue_free()
+		center_toast = null
+	if current_page == "game" and model.level >= 5:
+		daily_check += delta
+		if daily_check >= 1.0:
+			daily_check = 0
+			save.refresh_daily()
+			_update_bag_badge()
 	if current_page == "game":
 		model.tick(delta)
 		_update_hud(delta)
@@ -175,7 +194,9 @@ func _input(event: InputEvent) -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
 		if current_page == "game":
-			if model.state == BoardModel.GameState.PAUSED:
+			if bag_mode != "":
+				_close_bag()
+			elif model.state == BoardModel.GameState.PAUSED:
 				_resume()
 			elif model.active():
 				_pause()
@@ -183,6 +204,13 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_show_home()
 
 func _new_page(name_value: String) -> void:
+	bag_mode = ""
+	bag_teaching = false
+	bag_button = null
+	bag_badge = null
+	bag_dialog = null
+	if is_instance_valid(center_toast): center_toast.queue_free()
+	center_toast = null
 	pending_win = false
 	audio.reset_effects()
 	audio.set_game_paused(false)
@@ -265,7 +293,9 @@ func _start_level(number: int) -> void:
 	toast_until = 0
 	combo_until = 0
 	save.last_selected = number
-	save.save_progress()
+	run_id = save.begin_run()
+	win_reward = false
+	if number >= 5: save.refresh_daily()
 	game_hud = Control.new()
 	game_hud.name = "GameHUD"
 	game_hud.size = Vector2(720, 84)
@@ -305,6 +335,16 @@ func _start_level(number: int) -> void:
 		slot.name = "ReservedFunction%d" % (i + 1)
 		slot.disabled = true
 		slot.focus_mode = Control.FOCUS_NONE
+		if i == 0 and number >= 5:
+			bag_button = slot
+			slot.texture_normal = preload("res://assets/ui/bag_slot.svg")
+			slot.texture_disabled = slot.texture_normal
+			slot.disabled = false
+			slot.pressed.connect(_open_bag)
+			BagDialog.art(slot, preload("res://assets/art/takeaway-bag.png"), Rect2(18, 9, 84, 94))
+			var badge = _panel(slot, Rect2(83, 88, 40, 35), Color("c63225"), 18, CREAM)
+			bag_badge = _label(badge, "", Rect2(0, 0, 40, 35), 24, Color.WHITE)
+			_update_bag_badge()
 	# Empty banner reservation, matching the reference banner's ~6.6:1 ratio.
 	var ad_space = Control.new()
 	ad_space.name = "AdSlot"
@@ -315,6 +355,7 @@ func _start_level(number: int) -> void:
 	model.start(config)
 	_layout_game()
 	_update_hud(0)
+	if number >= 5 and not save.bag_tutorial_done: _show_bag_unlock()
 
 func _hud_number_style(label: Label) -> void:
 	label.add_theme_constant_override("outline_size", 5)
@@ -377,7 +418,7 @@ func _on_model_event(kind: String, detail: Dictionary) -> void:
 			haptics.set_game_paused(false)
 		"pick", "cancel": audio.play(kind)
 		"refill": audio.refill(model.grills[detail.grill].refill_foods.size())
-		"lid_opening": audio.schedule("lid", BoardModel.LID_OPEN_DELAY)
+		"lid_opening": audio.schedule("lid", detail.get("delay", BoardModel.LID_OPEN_DELAY))
 		"transfer":
 			audio.play("move")
 			audio.schedule("swap" if detail.swap else "drop", 0.16)
@@ -386,6 +427,15 @@ func _on_model_event(kind: String, detail: Dictionary) -> void:
 			haptics.match_food(detail.combo, detail.double)
 			combo_label.text = "双重消除！  连消 ×%d" % detail.combo if detail.double else ("好香！  连消 ×%d" % detail.combo if detail.combo > 1 else "滋啦～  美味出炉！")
 			combo_until = model.clock + 1.2
+		"pack":
+			audio.play("bag")
+			audio.schedule("gather", 0.15)
+			audio.schedule("match", 0.7)
+			haptics.match_food(detail.combo, false, 0.7)
+			combo_label.text = "打包出炉！" if detail.combo < 3 else "打包出炉！ 连消 ×%d" % detail.combo
+			combo_until = model.clock + 1.6
+		"pack_finished":
+			board.reset_hint()
 		"refill_tip":
 			hint_label.text = "烤架清空后，下方食材会自动补上"
 			toast_until = model.clock + 1.5
@@ -393,7 +443,7 @@ func _on_model_event(kind: String, detail: Dictionary) -> void:
 			hint_label.text = "就是这样！开动脑筋，让美味一起出炉"
 			toast_until = model.clock + 2
 		"win":
-			save.complete_level(model.level)
+			win_reward = save.complete_level(model.level, run_id)
 			pending_win = true
 		"fail":
 			audio.reset_effects()
@@ -412,6 +462,9 @@ func _pause() -> void:
 	_settings_buttons(content, 472)
 
 func _resume() -> void:
+	if bag_mode != "":
+		_close_bag()
+		return
 	_close_modal()
 	model.resume()
 
@@ -456,7 +509,7 @@ func _show_result(won: bool) -> void:
 	var title = ("全部通关！" if model.level == 10 else "美味出炉！") if won else "时间到！"
 	var subtitle = "第 %d 关完成  ·  用时 %s" % [model.level, _time_text(model.time_limit - model.remaining)] if won else "已经完成 %d / %d 组，再试一次吧" % [model.matches, model.total_matches]
 	var content = _open_modal(title, subtitle, 610 if won else 500)
-	_label(content, "今夜，你就是夜市大厨。" if won else "好味道，值得再来一串。", Rect2(38, 153, 480, 48), 26, GOLD)
+	_label(content, ("本局获得 +50 金币" if win_reward else "今夜，你就是夜市大厨。") if won else "好味道，值得再来一串。", Rect2(38, 153, 480, 48), 26, GOLD)
 	if won:
 		_button(content, "下一关" if model.level < 10 else "回到关卡选择", Rect2(62, 241, 432, 79), func():
 			if model.level < 10: _start_level(model.level + 1)
@@ -550,3 +603,113 @@ func _button(parent: Control, text_value: String, rect: Rect2, action: Callable,
 	button.pressed.connect(action)
 	parent.add_child(button)
 	return button
+
+func _update_bag_badge() -> void:
+	if not is_instance_valid(bag_badge): return
+	var count = save.available_bags()
+	bag_badge.text = str(count) if count > 0 else "+"
+	var panel = bag_badge.get_parent()
+	panel.add_theme_stylebox_override("panel", _style(Color("c63225") if count > 0 else Color("4f9f27"), 18, CREAM))
+
+func _show_bag_unlock() -> void:
+	bag_teaching = true
+	bag_mode = "unlock"
+	model.pause()
+	var content = _open_modal("新道具解锁", "打包袋 · 任意打包一种烤串", 420)
+	BagDialog.art(content, preload("res://assets/art/takeaway-bag.png"), Rect2(190, 165, 176, 180))
+	_label(content, "赠送 1 次！点击下方打包袋试试", Rect2(23, 352, 510, 42), 26, GOLD)
+	var position_y = bottom_ui.position.y
+	var spotlight = _texture_button(modal, preload("res://assets/ui/bag_slot.svg"), Rect2(72, position_y, 120, 124))
+	spotlight.name = "BagUnlock"
+	BagDialog.art(spotlight, preload("res://assets/art/takeaway-bag.png"), Rect2(18, 9, 84, 94))
+	var lock = BagDialog.art(spotlight, preload("res://assets/ui/locked_slot.svg"), Rect2(0, 0, 120, 124))
+	var unlock = lock.create_tween()
+	unlock.tween_property(lock, "modulate:a", 0.0, 0.35).set_delay(0.12)
+	unlock.tween_callback(lock.queue_free)
+	spotlight.pressed.connect(func(): _show_bag_dialog(false))
+	_label(spotlight, "免费", Rect2(8, 95, 104, 33), 24, CREAM)
+	var arrow = _label(modal, "↓", Rect2(84, position_y - 78, 96, 75), 69, GOLD)
+	BagDialog.outline(arrow, 5)
+	var tween = arrow.create_tween().set_loops()
+	tween.tween_property(arrow, "position:y", position_y - 66, 0.35)
+	tween.tween_property(arrow, "position:y", position_y - 78, 0.35)
+	spotlight.pivot_offset = spotlight.size * 0.5
+	var reveal = spotlight.create_tween()
+	spotlight.scale = Vector2.ONE * 0.3
+	reveal.tween_property(spotlight, "scale", Vector2.ONE, 0.4).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+func _open_bag() -> void:
+	if not model.active() or model.pack_until >= 0: return
+	save.refresh_daily()
+	bag_teaching = false
+	model.pause()
+	_show_bag_dialog(save.available_bags() == 0)
+
+func _show_bag_dialog(shop: bool) -> void:
+	var old = _open_modal("", "", 890)
+	modal.remove_child(old)
+	old.queue_free()
+	bag_mode = "shop" if shop else "use"
+	bag_dialog = BagDialog.new()
+	bag_dialog.position = Vector2(60, (stage.size.y - 890) * 0.5)
+	modal.add_child(bag_dialog)
+	bag_dialog.setup(self, shop, bag_teaching)
+	bag_dialog.add_wallet(self, modal)
+	bag_dialog.closed.connect(_close_bag)
+	bag_dialog.used.connect(_use_bag)
+	bag_dialog.exchanged.connect(_exchange_bag)
+	bag_dialog.ad_requested.connect(_request_bag_ad)
+	bag_dialog.pivot_offset = bag_dialog.size * 0.5
+	bag_dialog.scale = Vector2.ONE * 0.94
+	var tween = bag_dialog.create_tween()
+	tween.tween_property(bag_dialog, "scale", Vector2.ONE, 0.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+func _close_bag() -> void:
+	if bag_teaching: return
+	bag_mode = ""
+	bag_dialog = null
+	_close_modal()
+	model.resume()
+	_update_bag_badge()
+
+func _use_bag() -> void:
+	if bag_mode != "use" or model.state != BoardModel.GameState.PAUSED: return
+	var choice = model.pack_candidate("C" if bag_teaching else "")
+	if choice.is_empty():
+		_show_center_toast("食材正在整理，请稍后再试")
+		_close_bag()
+		return
+	var teaching = bag_teaching
+	if not save.consume_bag(teaching):
+		_show_center_toast("次数不足或存档失败，请稍后再试")
+		return
+	bag_teaching = false
+	_close_bag()
+	# No await between the validated selection, persisted debit and model commit.
+	model.pack_food(choice.food, teaching)
+	_update_bag_badge()
+
+func _exchange_bag() -> void:
+	if bag_mode != "shop": return
+	var result = save.buy_bag()
+	if result == ERR_UNAVAILABLE:
+		_show_center_toast("金币不足，通关可获得金币")
+	elif result != OK:
+		_show_center_toast("保存失败，请稍后再试")
+	else:
+		_close_bag()
+		_show_center_toast("兑换成功，打包袋 +1")
+
+func _request_bag_ad() -> void:
+	# The rewarded-video slot is intentionally unconfigured until an ad ID arrives.
+	# A future completed-view callback must credit persistent stock, never auto-use.
+	_show_center_toast("广告尚未准备好")
+
+func _show_center_toast(message: String) -> void:
+	if is_instance_valid(center_toast):
+		stage.remove_child(center_toast)
+		center_toast.queue_free()
+	center_toast = _panel(stage, Rect2(94, stage.size.y * 0.5 - 40, 532, 80), Color(0.04, 0.035, 0.03, 0.94), 17)
+	center_toast.name = "CenterToast"
+	_label(center_toast, message, Rect2(12, 10, 508, 60), 27, Color.WHITE)
+	center_toast_until = ui_clock + 2.0

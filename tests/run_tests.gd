@@ -42,7 +42,7 @@ func move(model: BoardModel, source: int, source_slot: int, target: int, target_
 	return model.drop(target, target_slot, model.grills[target].version)
 
 func _test_levels() -> void:
-	var expected = [5, 10, 12, 12, 15, 16, 18, 20, 20, 22]
+	var expected = [5, 10, 12, 12, 24, 16, 18, 20, 20, 22]
 	for number in range(1, 11):
 		var config = LevelLoader.load_level(number)
 		check(not config.is_empty(), "level %d loads and validates" % number)

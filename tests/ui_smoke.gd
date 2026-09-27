@@ -138,10 +138,15 @@ func drag(from: Vector2, to: Vector2) -> void:
 	await process_frame
 
 func click(position: Vector2) -> void:
+	# Keep synthetic clicks in one input burst; native mouse events between the
+	# press/release frames can otherwise cancel a button's pressed state.
+	var motion = InputEventMouseMotion.new()
+	motion.position = position
+	root.push_input(motion, true)
 	for pressed in [true, false]:
 		var event = InputEventMouseButton.new()
 		event.button_index = MOUSE_BUTTON_LEFT
 		event.pressed = pressed
 		event.position = position
 		root.push_input(event, true)
-		await process_frame
+	await process_frame

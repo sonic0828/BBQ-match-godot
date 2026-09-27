@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="890" viewBox="0 0 600 890"><defs>
+<linearGradient id="gold" x2="0" y2="1"><stop stop-color="#fff0bc"/><stop offset=".4" stop-color="#e9a656"/><stop offset=".8" stop-color="#fff0c0"/><stop offset="1" stop-color="#b9652c"/></linearGradient>
+<linearGradient id="blue" x2=".8" y2="1"><stop stop-color="#368afa"/><stop offset=".45" stop-color="#1a58bb"/><stop offset="1" stop-color="#124895"/></linearGradient>
+<radialGradient id="cream"><stop stop-color="#fff8b4"/><stop offset="1" stop-color="#f9e6c7"/></radialGradient>
+</defs>
+<rect x="11" y="72" width="578" height="805" rx="48" fill="#5d2918"/>
+<rect x="8" y="60" width="584" height="811" rx="48" fill="url(#gold)" stroke="#713c1d" stroke-width="5"/>
+<rect x="23" y="73" width="554" height="782" rx="35" fill="url(#blue)" stroke="#ffdf9d" stroke-width="4"/>
+<rect x="37" y="92" width="526" height="750" rx="27" fill="none" stroke="#428ae1" stroke-width="6"/>
+<path d="M40 721 Q67 758 48 802 Q100 790 88 732 Q113 783 99 831 H41Z M549 700 Q518 755 539 787 Q495 780 511 728 Q477 793 512 831 H557Z" fill="#5795e7" opacity=".28"/>
+<path d="M64 34 Q300 -2 536 34 L516 160 Q300 181 84 160Z" fill="#0b3069" stroke="#542d24" stroke-width="6"/>
+<path d="M70 25 Q300 -8 530 25 L514 149 Q300 171 87 149Z" fill="url(#blue)" stroke="#0c377d" stroke-width="5"/>
+<path d="M86 40 Q300 10 514 40 L500 136 Q300 157 100 136Z" fill="none" stroke="#51a0ff" stroke-width="4"/>
+<path d="M106 44 Q300 20 489 44" fill="none" stroke="#9edcff" stroke-width="5" opacity=".8"/>
+<rect x="86" y="20" width="18" height="53" rx="8" fill="#794519" stroke="#522b15" stroke-width="3"/>
+<rect x="88" y="15" width="15" height="48" rx="6" fill="url(#gold)"/>
+<rect x="496" y="20" width="18" height="53" rx="8" fill="#794519" stroke="#522b15" stroke-width="3"/>
+<rect x="498" y="15" width="15" height="48" rx="6" fill="url(#gold)"/>
+<rect x="49" y="175" width="502" height="341" rx="30" fill="url(#cream)" stroke="url(#gold)" stroke-width="7"/>
+<rect x="56" y="182" width="488" height="327" rx="25" fill="none" stroke="#fffaf0" stroke-width="3"/>
+<g fill="#fff8d8" opacity=".6"><path d="M300 347 L186 186 H264Z M300 347 L360 186 H443Z M300 347 L545 261 V316Z M300 347 L545 418 V473Z M300 347 L348 508 H264Z M300 347 L58 463 V398Z M300 347 L58 251 V196Z"/></g>
+<g fill="#ffc044" stroke="#e89e2a" stroke-width="2"><path d="M131 274 l-23 -26 -10 12 24 23Z M118 314 l-28 -4 -2 13 30 3Z M464 392 l24 4 2 -14 -26 -3Z"/></g>
+</svg>

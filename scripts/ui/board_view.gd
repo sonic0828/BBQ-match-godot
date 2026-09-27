@@ -6,6 +6,9 @@ const REFILL_DURATION = 0.32
 const REFILL_STAGGER = 0.05
 const TRAY_REVEAL_END = 0.49
 const HINT_DELAY = 8.0
+const BAG_TEXTURE = preload("res://assets/art/takeaway-bag.png")
+var packing: Dictionary = {}
+
 const LID_TEXTURE = preload("res://assets/ui/grill_lid.svg")
 
 var model: BoardModel
@@ -125,6 +128,8 @@ func advance_animations(delta: float) -> void:
 			refills.erase(index)
 	if model.state != BoardModel.GameState.PAUSED:
 		motions = motions.filter(func(m): return model.clock - m.start < m.duration and m.epoch == model.epoch)
+	if not packing.is_empty() and (packing.epoch != model.epoch or animation_clock - packing.start >= BoardModel.PACK_DURATION):
+		packing.clear()
 	_advance_hint(delta)
 
 func reset_hint() -> void:
@@ -138,7 +143,7 @@ func note_pointer(pressed: bool) -> void:
 	hint_pointer_down = pressed
 
 func _advance_hint(delta: float) -> void:
-	if model.state != BoardModel.GameState.PLAYING or hint_pointer_down or not model.drag.is_empty():
+	if not packing.is_empty() or model.state != BoardModel.GameState.PLAYING or hint_pointer_down or not model.drag.is_empty():
 		hint_slots.clear()
 		hint_idle = 0.0
 		hint_scan_left = 0.0
@@ -169,16 +174,21 @@ func lid_alpha(index: int) -> float:
 	return 1.0 - smoothstep(0, BoardModel.LID_FADE_DURATION, model.clock - grill.lid_open_at)
 
 func has_combo_animations() -> bool:
-	return not combos.is_empty()
+	return not combos.is_empty() or not packing.is_empty()
 
 func _on_event(kind: String, detail: Dictionary) -> void:
-	if kind in ["started", "paused", "resumed", "win", "fail", "tutorial_done"]:
+	if kind in ["started", "paused", "resumed", "win", "fail", "tutorial_done", "pack", "pack_finished"]:
 		reset_hint()
 	elif kind in ["pick", "transfer", "cancel", "match", "refill", "lid_opening", "lid_opened"]:
 		hint_slots.clear()
 		hint_scan_left = 0.0
 	match kind:
+		"pack":
+			packing = detail.duplicate(true)
+			packing.start = model.clock
+			packing.epoch = model.epoch
 		"started":
+			packing.clear()
 			animation_clock = model.clock
 			motions.clear()
 			combos.clear()
@@ -208,6 +218,7 @@ func _on_event(kind: String, detail: Dictionary) -> void:
 			refills[detail.grill] = {"foods": grill.refill_foods.duplicate(), "start": model.clock,
 				"plates": grill.queue.size() + 1, "version": grill.version, "epoch": model.epoch}
 		"fail":
+			packing.clear()
 			combos.clear()
 			refills.clear()
 			motions.clear()
@@ -230,6 +241,7 @@ func _draw() -> void:
 		var center = pointer + Vector2(0, -24)
 		_draw_food(model.drag.food, center + Vector2(6, 12), Vector2(69, 169), Color(0.05, 0.025, 0.01, 0.4))
 		_draw_food(model.drag.food, center, Vector2(69, 169), Color.WHITE)
+	if not packing.is_empty(): _draw_packing()
 	if model.state == BoardModel.GameState.TUTORIAL and tutorial_visible and model.drag.is_empty():
 		_draw_tutorial()
 
@@ -383,3 +395,30 @@ func _draw_tutorial() -> void:
 	var finger = from.lerp(to, smoothstep(0, 0.85, progress))
 	draw_circle(finger, 14, Color(1, 0.95, 0.82, 0.94))
 	draw_arc(finger, 21, 0, TAU, 28, Color(1, 0.86, 0.54, 0.6), 3, true)
+
+func _draw_packing() -> void:
+	var age = animation_clock - packing.start
+	var exit = smoothstep(1.12, BoardModel.PACK_DURATION, age)
+	var pop = 1.0 + sin(clampf(age / 0.24, 0, 1) * PI) * 0.12
+	var center = Vector2(360, minf(size.y - 170, row_gap * 1.55))
+	center.y += (1.0 - smoothstep(0, 0.24, age)) * 120 - exit * 100
+	var color = Color(1, 1, 1, 1 - exit)
+	for i in range(packing.sources.size()):
+		var source = packing.sources[i]
+		var origin = slot_center(source.grill, source.slot) if source.plate < 0 else plate_center(source.grill)
+		var t = clampf((age - 0.14 - i * 0.1) / 0.5, 0, 1)
+		if t >= 1: continue
+		var destination = center + Vector2(0, -62)
+		var point = origin.lerp(destination, t) + Vector2(0, -sin(t * PI) * 125)
+		var food_scale = lerpf(1.0 if source.plate < 0 else 0.5, 0.38, t)
+		_draw_food(packing.food, point, Vector2(62, 156) * food_scale, Color(1, 1, 1, 1 - smoothstep(0.8, 1, t)))
+	var angle = sin(age * 32) * 0.055 * smoothstep(0.5, 0.8, age) * (1 - exit)
+	draw_set_transform(center, angle, Vector2(pop, pop * (1 - sin(age * 24) * 0.025)))
+	draw_texture_rect(BAG_TEXTURE, Rect2(-111, -128, 222, 256), false, color)
+	draw_set_transform(Vector2.ZERO)
+	if age > 0.65:
+		for i in range(6):
+			var direction = Vector2.from_angle(i * TAU / 6 + 0.3)
+			var point = center + direction * (95 + (age - 0.65) * 35)
+			var r = maxf(0, sin((age - 0.65) / 0.8 * PI)) * 9
+			draw_colored_polygon(PackedVector2Array([point + Vector2(-r, 0), point + Vector2(0, -r * 1.5), point + Vector2(r, 0), point + Vector2(0, r * 1.5)]), Color(1, 0.87, 0.4, color.a))

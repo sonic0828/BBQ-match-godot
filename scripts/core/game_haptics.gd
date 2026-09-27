@@ -16,12 +16,12 @@ func _ready() -> void:
 	if OS.has_feature("wechat"):
 		bridge = JavaScriptBridge.get_interface("bbqHaptics")
 
-func match_food(combo: int, simultaneous: bool) -> void:
+func match_food(combo: int, simultaneous: bool, impact_delay: float = 0.27) -> void:
 	if not enabled or backgrounded or game_paused:
 		return
 	var pulses = 3 if combo >= 3 else (2 if simultaneous or combo == 2 else 1)
 	for i in range(pulses):
-		var at = clock + 0.27 + i * 0.12
+		var at = clock + impact_delay + i * 0.12
 		# Two grills can emit match in the same frame: one shared rhythm, not two.
 		if not pending.any(func(queued): return absf(queued - at) < 0.04):
 			pending.append(at)

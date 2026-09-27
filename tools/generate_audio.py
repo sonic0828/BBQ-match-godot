@@ -185,6 +185,19 @@ def render_lid():
     return clip(.36, [(normalize(signal), 0, .16)])
 
 
+def render_bag():
+    # Three soft paper folds, generated independently of the music RNG state.
+    state = RNG.bit_generator.state
+    RNG.bit_generator.state = np.random.default_rng(260927).bit_generator.state
+    d = .85
+    t = np.arange(int(SR * d)) / SR
+    envelope = sum(np.exp(-((t - at) / width) ** 2) for at, width in [(.08, .035), (.33, .055), (.65, .065)])
+    signal = noise(d, 700, 4700) * envelope * (.7 + .3 * np.sin(t * 430) ** 2)
+    result = clip(.95, [(normalize(signal), 0, .17)])
+    RNG.bit_generator.state = state
+    return result
+
+
 def render_effects():
     # Match impact is a separate clip: gameplay schedules it at the plate pop.
     pitch, bright = .96, .85
@@ -206,6 +219,7 @@ def render_effects():
                             for j, note in enumerate([69, 73, 76, 81])]),
         'fail': clip(.85, [(tone(64, .7, 'soft'), 0, .17), (tone(62, .65, 'soft'), .15, .15)]),
         'lid': render_lid(),
+        'bag': render_bag(),
     }
     return sounds
 
@@ -221,7 +235,7 @@ def main():
             write_wav(source, signal)
             subprocess.run(['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error', '-i', str(source),
                             '-ar', '22050', '-ac', '1', '-c:a', 'pcm_s16le', str(OUT / f'{name}.wav')], check=True)
-    print('Generated 41.74-second looping music and 13 original effects in', OUT)
+    print('Generated 41.74-second looping music and 14 original effects in', OUT)
 
 
 if __name__ == '__main__':

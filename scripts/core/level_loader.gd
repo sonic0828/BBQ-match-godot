@@ -20,7 +20,7 @@ static func validate(config: Dictionary) -> Array[String]:
 	var counts: Dictionary = {}
 	var ids: Array = []
 	var grills = config.get("grills", [])
-	var expected = 6 if config.get("level", 0) == 1 else (10 if config.get("level", 0) == 4 else 9)
+	var expected = 6 if config.get("level", 0) == 1 else (10 if config.get("level", 0) == 4 else (12 if config.get("level", 0) == 5 else 9))
 	if grills.size() != expected:
 		errors.append("grills: expected %d" % expected)
 	if float(config.get("timeLimitSec", 0)) <= 0:

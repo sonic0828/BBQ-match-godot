@@ -5,7 +5,7 @@ extends RefCounted
 signal event(kind: String, detail: Dictionary)
 
 enum GameState { INIT, TUTORIAL, PLAYING, PAUSED, WIN, FAIL }
-enum GrillState { STABLE, TRANSFERRING, MATCHING, CLEARING, EMPTY, REFILLING, LOCKED, OPENING }
+enum GrillState { STABLE, TRANSFERRING, MATCHING, CLEARING, EMPTY, REFILLING, LOCKED, OPENING, PACKING }
 enum InteractionState { IDLE, DRAGGING, COMMITTING, CANCELING }
 
 const LID_OPEN_DELAY = 0.27 # Start fading with the matched food's plate impact.
@@ -29,6 +29,10 @@ var refill_tip_shown = false
 var epoch = 0
 var resume_state = GameState.PLAYING
 var settle_time = 0.0
+const PACK_DURATION = 1.55
+var pack_until = -1.0
+var pack_refill_at = -1.0
+var pack_tutorial = false
 
 func start(config: Dictionary) -> void:
 	epoch += 1
@@ -43,6 +47,8 @@ func start(config: Dictionary) -> void:
 	combo = 0
 	last_match_at = -100.0
 	settle_time = 0.0
+	pack_until = -1.0
+	pack_tutorial = false
 	tutorial = config.get("tutorial", "")
 	tutorial_done = false
 	refill_tip_shown = false
@@ -71,7 +77,7 @@ func active() -> bool:
 	return state in [GameState.PLAYING, GameState.TUTORIAL]
 
 func can_touch(index: int) -> bool:
-	return active() and index >= 0 and index < grills.size() and grills[index].state == GrillState.STABLE
+	return active() and pack_until < 0 and index >= 0 and index < grills.size() and grills[index].state == GrillState.STABLE
 
 func begin_drag(index: int, slot: int) -> bool:
 	if not can_touch(index) or slot < 0 or slot > 2 or not drag.is_empty():
@@ -146,7 +152,7 @@ func resume() -> void:
 func tick(delta: float) -> void:
 	if not active():
 		return
-	if state == GameState.PLAYING:
+	if state == GameState.PLAYING and not pack_tutorial:
 		remaining = maxf(0.0, remaining - delta)
 		if remaining <= 0.0:
 			cancel_drag()
@@ -154,12 +160,20 @@ func tick(delta: float) -> void:
 			event.emit("fail", {})
 			return
 	clock += delta
+	if pack_until >= 0 and clock >= pack_until:
+		pack_until = -1.0
+		pack_tutorial = false
+		event.emit("pack_finished", {})
 	if clock - last_match_at > 2.0:
 		combo = 0
 	for index in range(grills.size()):
 		var grill = grills[index]
 		grill.elapsed += delta
 		match grill.state:
+			GrillState.PACKING:
+				if clock >= pack_refill_at:
+					_set_state(index, GrillState.STABLE)
+					_resolve(index)
 			GrillState.OPENING:
 				if clock >= grill.lid_open_at + LID_FADE_DURATION:
 					grill.version += 1
@@ -204,19 +218,85 @@ func _resolve(index: int) -> void:
 		return
 	if _is_match(index):
 		_set_state(index, GrillState.MATCHING)
-		combo = combo + 1 if clock - last_match_at <= 2.0 else 1
-		var simultaneous = is_equal_approx(clock, last_match_at)
-		last_match_at = clock
-		matches += 1
-		event.emit("match", {"grill": index, "combo": combo, "double": simultaneous})
-		for locked_index in range(grills.size()):
-			var locked = grills[locked_index]
-			if locked.state == GrillState.LOCKED and locked.unlock_food == grills[index].slots[0]:
-				_set_state(locked_index, GrillState.OPENING)
-				locked.lid_open_at = clock + LID_OPEN_DELAY
-				event.emit("lid_opening", {"grill": locked_index})
+		var detail = _record_match(grills[index].slots[0])
+		detail.grill = index
+		event.emit("match", detail)
 	elif grills[index].slots == ["", "", ""]:
 		_refill(index)
+
+func _record_match(food: String, opening_delay: float = LID_OPEN_DELAY) -> Dictionary:
+	combo = combo + 1 if clock - last_match_at <= 2.0 else 1
+	var simultaneous = is_equal_approx(clock, last_match_at)
+	last_match_at = clock
+	matches += 1
+	for index in range(grills.size()):
+		var grill = grills[index]
+		if grill.state == GrillState.LOCKED and grill.unlock_food == food:
+			_set_state(index, GrillState.OPENING)
+			grill.lid_open_at = clock + opening_delay
+			event.emit("lid_opening", {"grill": index, "delay": opening_delay})
+	return {"combo": combo, "double": simultaneous}
+
+func pack_candidate(preferred: String = "") -> Dictionary:
+	if state not in [GameState.PLAYING, GameState.PAUSED] or pack_until >= 0 or not drag.is_empty(): return {}
+	var foods: Dictionary = {}
+	var visible: Dictionary = {}
+	var keys: Array = []
+	for index in range(grills.size()):
+		var grill = grills[index]
+		if grill.state == GrillState.LOCKED:
+			keys.append(grill.unlock_food)
+			continue
+		if grill.state != GrillState.STABLE: return {}
+		for slot in range(3):
+			var food = grill.slots[slot]
+			if food == "": continue
+			if not foods.has(food): foods[food] = []
+			foods[food].append({"grill": index, "slot": slot, "plate": -1, "offset": -1})
+			visible[food] = visible.get(food, 0) + 1
+	# Visible food always comes first; reserve food never comes from a closed lid.
+	for index in range(grills.size()):
+		var grill = grills[index]
+		if grill.state == GrillState.LOCKED: continue
+		for plate in range(grill.queue.size()):
+			for offset in range(grill.queue[plate].size()):
+				var food = grill.queue[plate][offset]
+				if not foods.has(food): foods[food] = []
+				foods[food].append({"grill": index, "slot": -1, "plate": plate, "offset": offset})
+	var chosen = ""
+	var best = -1
+	for food in foods:
+		if foods[food].size() < 3 or (preferred != "" and food != preferred): continue
+		var score = mini(visible.get(food, 0), 3) * 10 + (50 if food in keys else 0)
+		if score > best:
+			best = score
+			chosen = food
+	if chosen == "": return {}
+	return {"food": chosen, "sources": foods[chosen].slice(0, 3)}
+
+func pack_food(food: String, tutorial_use: bool = false) -> bool:
+	if not active(): return false
+	var selected = pack_candidate(food)
+	if selected.is_empty(): return false
+	pack_until = clock + PACK_DURATION
+	pack_refill_at = clock + 0.8
+	pack_tutorial = tutorial_use
+	# Reverse the source list so removing reserve entries preserves earlier indices.
+	var sources = selected.sources.duplicate(true)
+	sources.reverse()
+	for source in sources:
+		var grill = grills[source.grill]
+		if source.plate < 0:
+			grill.slots[source.slot] = ""
+		else:
+			grill.queue[source.plate].remove_at(source.offset)
+			if grill.queue[source.plate].is_empty(): grill.queue.remove_at(source.plate)
+		grill.version += 1
+		_set_state(source.grill, GrillState.PACKING)
+	var detail = _record_match(food, 0.7)
+	detail.merge(selected)
+	event.emit("pack", detail)
+	return true
 
 func _refill(index: int) -> void:
 	var grill = grills[index]
@@ -237,6 +317,7 @@ func _refill(index: int) -> void:
 		event.emit("refill_tip", {})
 
 func is_cleared() -> bool:
+	if pack_until >= 0: return false
 	for grill in grills:
 		if grill.state != GrillState.STABLE or grill.slots != ["", "", ""] or not grill.queue.is_empty():
 			return false
