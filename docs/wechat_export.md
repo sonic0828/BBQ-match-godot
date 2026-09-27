@@ -143,6 +143,12 @@ build/wechat/
 - 本机开发者工具的 iOS 真机调试提示要求微信 8.0.61 以上及 USB 连接；二维码面板选中 Android 时不能用于 iPhone 调试。普通“预览”不受此调试连接条件限制。
 - 导出会替换构建目录。若开发者工具仍使用旧文件列表并报 `module 'game.js' is not defined`，关闭该工程窗口后重新打开，重新扫描文件；不需要清理游戏存档。
 
+### 首页游戏圈入口（2026-09-27）
+
+`platform/wechat/game-club.js` 保存游戏圈首页 OPENLINK，通过 `wx.createPageManager()` 的 `load({ openlink })` 与 `show()` 打开。接口按 [微信官方小游戏 API 类型定义](https://github.com/wechat-miniprogram/minigame-api-typings/blob/master/types/wx/lib.wx.api.d.ts) 接入；首次点击才创建和加载，返回后复用页面，失败销毁并允许重试。缺少接口时提示更新微信。
+
+`game.js` 将桥接安装到 `GameGlobal.bbqGameClub`，首页按钮通过 Godot `JavaScriptBridge` 调用；标准导出会复制该 JS。更换游戏圈地址时更新此模块，并同步链接回归测试。真机需检查点击后进入正确游戏圈、关闭后回到游戏；若开放页面报告版本不匹配，应核对后台 OPENLINK 所属的开发／体验／正式版本，不修改用户存档。
+
 ### iPhone 只读像素比例错误（2026-09-24）
 
 用户反馈同包在 Android 可以启动和操作。iPhone 16 Pro 的诊断弹窗显示微信 8.0.78、基础库 3.17.3、普通模式，在加载分包时抛出 `Attempted to assign to readonly property`，位置为 `godot-sdk.js:1:27905`。

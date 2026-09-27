@@ -195,7 +195,20 @@ func _show_home() -> void:
 	model.cancel_drag()
 	model.state = BoardModel.GameState.INIT
 	_new_page("home")
-	_button(page, "设置", Rect2(566, 48, 110, 58), _show_settings, false, 24)
+	var settings_button = _button(page, "设置", Rect2(566, 48, 110, 58), _show_settings, false, 24)
+	settings_button.name = "SettingsButton"
+	var club_button = _button(page, "", Rect2(566, 122, 110, 110), _open_game_club)
+	club_button.name = "GameClubButton"
+	club_button.tooltip_text = "游戏圈"
+	var club_icon = TextureRect.new()
+	club_icon.texture = preload("res://assets/ui/game_club.svg")
+	club_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	club_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	club_icon.position = Vector2(30, 12)
+	club_icon.size = Vector2(50, 50)
+	club_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	club_button.add_child(club_icon)
+	_label(club_button, "游戏圈", Rect2(4, 68, 102, 30), 23, CREAM)
 	_label(page, "人 间 烟 火  ·  一 串 入 魂", Rect2(60, 148, 600, 38), 23, GOLD)
 	var title = _label(page, "烧烤消消消", Rect2(30, 206, 660, 112), 76, CREAM)
 	title.add_theme_constant_override("outline_size", 12)
@@ -394,6 +407,15 @@ func _show_settings() -> void:
 	var content = _open_modal("小摊设置", "调成你喜欢的节奏", 485)
 	_settings_buttons(content, 177)
 	_button(content, "好，知道啦", Rect2(62, 343, 432, 76), _close_modal, true)
+
+func _open_game_club() -> void:
+	if OS.has_feature("wechat"):
+		var bridge = JavaScriptBridge.get_interface("bbqGameClub")
+		if bridge != null:
+			bridge.open()
+			return
+	var content = _open_modal("游戏圈", "请在微信中打开游戏圈", 300)
+	_button(content, "知道了", Rect2(62, 189, 432, 72), _close_modal, true)
 
 func _settings_buttons(parent: Control, y: float) -> void:
 	var music_button = _button(parent, "音乐 " + ("开" if save.music_enabled else "关"), Rect2(42, y, 148, 70), func(): pass, false, 23)

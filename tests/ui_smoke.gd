@@ -14,6 +14,16 @@ func run() -> void:
 	await process_frame
 	await process_frame
 	check(app.current_page == "home", "home scene renders")
+	check("圈" in app.font.get_supported_chars(), "game circle label is included in the bundled font")
+	var club = app.page.get_node("GameClubButton")
+	# Children must pass clicks through to the full square button.
+	await click(club.get_child(0).get_global_rect().get_center())
+	check(app.modal != null and app.current_page == "home", "game circle icon opens the native preview explanation")
+	app._close_modal()
+	await process_frame
+	await click(club.get_child(1).get_global_rect().get_center())
+	check(app.modal != null, "game circle text is also clickable")
+	app._close_modal()
 	app._start_level(1)
 	await process_frame
 	var from = app.board.get_global_transform_with_canvas() * app.board.slot_center(2, 1)
@@ -56,6 +66,10 @@ func run() -> void:
 		root.size = dimensions
 		await process_frame
 		await process_frame
+		app._show_home()
+		club = app.page.get_node("GameClubButton")
+		var settings = app.page.get_node("SettingsButton")
+		check(club.size.x == club.size.y and club.size.x == settings.size.x and club.position.y > settings.position.y + settings.size.y, "game circle stays square below settings at %s" % str(dimensions))
 		app._start_level(3)
 		await process_frame
 		var safe_bounds = Rect2(Vector2.ZERO, app.size)
