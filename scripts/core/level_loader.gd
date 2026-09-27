@@ -20,8 +20,9 @@ static func validate(config: Dictionary) -> Array[String]:
 	var counts: Dictionary = {}
 	var ids: Array = []
 	var grills = config.get("grills", [])
-	if grills.size() != (6 if config.get("level", 0) == 1 else 9):
-		errors.append("grills: expected 6 for level 1, otherwise 9")
+	var expected = 6 if config.get("level", 0) == 1 else (10 if config.get("level", 0) == 4 else 9)
+	if grills.size() != expected:
+		errors.append("grills: expected %d" % expected)
 	if float(config.get("timeLimitSec", 0)) <= 0:
 		errors.append("timeLimitSec must be positive")
 	for grill in grills:
@@ -29,6 +30,8 @@ static func validate(config: Dictionary) -> Array[String]:
 		if id.is_empty() or id in ids:
 			errors.append("grill ID missing or duplicated: " + id)
 		ids.append(id)
+		if grill.has("unlockFood") and grill.unlockFood not in FOOD_TYPES:
+			errors.append(id + ".unlockFood must be a known food")
 		var initial = grill.get("initial", [])
 		if initial.size() != 3:
 			errors.append(id + ".initial must have exactly 3 slots")

@@ -5,6 +5,8 @@ const COMBO_DURATION = 0.95
 const REFILL_DURATION = 0.32
 const REFILL_STAGGER = 0.05
 const TRAY_REVEAL_END = 0.49
+const HINT_DELAY = 8.0
+const LID_TEXTURE = preload("res://assets/ui/grill_lid.svg")
 
 var model: BoardModel
 var pointer = Vector2.ZERO
@@ -21,6 +23,10 @@ var glow_style: StyleBoxFlat
 var hover_style: StyleBoxFlat
 var plate_style: StyleBoxFlat
 var stacked_plate_style: StyleBoxFlat
+var hint_slots: Array[Vector2i] = []
+var hint_idle = 0.0
+var hint_scan_left = 0.0
+var hint_pointer_down = false
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
@@ -55,6 +61,9 @@ func bind(value: BoardModel) -> void:
 func grill_rect(index: int) -> Rect2:
 	var row = index / 3
 	var column = index % 3
+	if model.grills.size() == 10 and index >= 6:
+		row = 2 if index == 6 else 3
+		column = 1 if index == 6 else index - 7
 	return Rect2(15.0 + column * 234.0, 16.0 + row * row_gap, 222.0, 156.0)
 
 func slot_center(index: int, slot: int) -> Vector2:
@@ -116,11 +125,58 @@ func advance_animations(delta: float) -> void:
 			refills.erase(index)
 	if model.state != BoardModel.GameState.PAUSED:
 		motions = motions.filter(func(m): return model.clock - m.start < m.duration and m.epoch == model.epoch)
+	_advance_hint(delta)
+
+func reset_hint() -> void:
+	hint_slots.clear()
+	hint_idle = 0.0
+	hint_scan_left = 0.0
+	hint_pointer_down = false
+
+func note_pointer(pressed: bool) -> void:
+	reset_hint()
+	hint_pointer_down = pressed
+
+func _advance_hint(delta: float) -> void:
+	if model.state != BoardModel.GameState.PLAYING or hint_pointer_down or not model.drag.is_empty():
+		hint_slots.clear()
+		hint_idle = 0.0
+		hint_scan_left = 0.0
+		return
+	hint_idle += delta
+	if hint_idle < HINT_DELAY: return
+	# Let plates and transfers finish before suggesting another move.
+	if not combos.is_empty() or not refills.is_empty() or not motions.is_empty():
+		hint_slots.clear()
+		hint_scan_left = 0.0
+		return
+	hint_scan_left -= delta
+	if hint_scan_left <= 0.0:
+		hint_slots = model.hint_group()
+		hint_scan_left = 0.25
+
+func hint_angle(index: int, slot: int) -> float:
+	if model.state != BoardModel.GameState.PLAYING or not model.can_touch(index) or Vector2i(index, slot) not in hint_slots:
+		return 0.0
+	var phase = fmod(maxf(0, hint_idle - HINT_DELAY), 1.15) / 0.65
+	if phase >= 1.0: return 0.0
+	return deg_to_rad(4.0) * sin(phase * TAU * 2) * sin(phase * PI)
+
+func lid_alpha(index: int) -> float:
+	var grill = model.grills[index]
+	if grill.state == BoardModel.GrillState.LOCKED: return 1.0
+	if grill.state != BoardModel.GrillState.OPENING: return 0.0
+	return 1.0 - smoothstep(0, BoardModel.LID_FADE_DURATION, model.clock - grill.lid_open_at)
 
 func has_combo_animations() -> bool:
 	return not combos.is_empty()
 
 func _on_event(kind: String, detail: Dictionary) -> void:
+	if kind in ["started", "paused", "resumed", "win", "fail", "tutorial_done"]:
+		reset_hint()
+	elif kind in ["pick", "transfer", "cancel", "match", "refill", "lid_opening", "lid_opened"]:
+		hint_slots.clear()
+		hint_scan_left = 0.0
 	match kind:
 		"started":
 			animation_clock = model.clock
@@ -180,6 +236,7 @@ func _draw() -> void:
 func _draw_grill(index: int) -> void:
 	var grill = model.grills[index]
 	var rect = grill_rect(index)
+	var cover = lid_alpha(index)
 	var active_match = grill.state in [BoardModel.GrillState.MATCHING, BoardModel.GrillState.CLEARING]
 	if active_match:
 		draw_style_box(glow_style, rect.grow(3))
@@ -188,6 +245,7 @@ func _draw_grill(index: int) -> void:
 	if active_match:
 		draw_rect(Rect2(rect.position + Vector2(33, 53), Vector2(156, 70)), Color(1, 0.27, 0.02, 0.20))
 	for slot in range(3):
+		if cover >= 1.0: continue
 		var center = slot_center(index, slot)
 		var food = grill.slots[slot]
 		var target_hover = hover == Vector2i(index, slot) and not model.drag.is_empty() and model.drag.grill != index and model.can_touch(index)
@@ -205,9 +263,12 @@ func _draw_grill(index: int) -> void:
 				in_motion = true
 		if in_motion:
 			continue
-		var tint = Color(1, 1, 1, 0.18) if dragging else Color.WHITE
+		var tint = Color(1, 1, 1, 0.18 if dragging else 1.0 - cover)
 		var food_size = Vector2(60, 153) * (1.08 if target_hover else 1.0)
-		_draw_food(food, center, food_size, tint)
+		_draw_food(food, center, food_size, tint, hint_angle(index, slot))
+	if cover > 0:
+		draw_texture_rect(LID_TEXTURE, rect, false, Color(1, 1, 1, cover))
+		_draw_food(grill.unlock_food, rect.position + Vector2(111, 98), Vector2(27, 57), Color(1, 1, 1, cover))
 	_draw_plate(index)
 
 func _draw_plate(index: int) -> void:
@@ -302,12 +363,14 @@ func _draw_star(center: Vector2, radius: float, color: Color) -> void:
 		points.append(center + Vector2(cos(angle), sin(angle)) * radius * (1.0 if i % 2 == 0 else 0.26))
 	draw_colored_polygon(points, color)
 
-func _draw_food(id: String, center: Vector2, bounds: Vector2, tint: Color) -> void:
+func _draw_food(id: String, center: Vector2, bounds: Vector2, tint: Color, angle: float = 0.0) -> void:
 	var texture = FoodArt.food(id)
 	var dimensions = texture.get_size()
 	var factor = minf(bounds.x / dimensions.x, bounds.y / dimensions.y)
 	var drawn = dimensions * factor
-	draw_texture_rect(texture, Rect2(center - drawn * 0.5, drawn), false, tint)
+	draw_set_transform(center, angle)
+	draw_texture_rect(texture, Rect2(-drawn * 0.5, drawn), false, tint)
+	draw_set_transform(Vector2.ZERO)
 
 func _draw_tutorial() -> void:
 	var from = slot_center(2, 1) if model.tutorial == "MOVE" else slot_center(0, 2)

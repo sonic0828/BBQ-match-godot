@@ -5,8 +5,11 @@ extends RefCounted
 signal event(kind: String, detail: Dictionary)
 
 enum GameState { INIT, TUTORIAL, PLAYING, PAUSED, WIN, FAIL }
-enum GrillState { STABLE, TRANSFERRING, MATCHING, CLEARING, EMPTY, REFILLING }
+enum GrillState { STABLE, TRANSFERRING, MATCHING, CLEARING, EMPTY, REFILLING, LOCKED, OPENING }
 enum InteractionState { IDLE, DRAGGING, COMMITTING, CANCELING }
+
+const LID_OPEN_DELAY = 0.27 # Start fading with the matched food's plate impact.
+const LID_FADE_DURATION = 0.35
 
 var state = GameState.INIT
 var interaction = InteractionState.IDLE
@@ -53,8 +56,11 @@ func start(config: Dictionary) -> void:
 		var queue = source.plates.duplicate(true)
 		for plate in queue:
 			total += plate.size()
-		grills.append({"slots": slots, "queue": queue, "state": GrillState.STABLE,
-			"elapsed": 0.0, "version": 0, "refill_foods": []})
+		var unlock_food = source.get("unlockFood", "")
+		grills.append({"slots": slots, "queue": queue,
+			"state": GrillState.LOCKED if unlock_food != "" else GrillState.STABLE,
+			"elapsed": 0.0, "version": 0, "refill_foods": [],
+			"unlock_food": unlock_food, "lid_open_at": -1.0})
 	total_matches = total / 3
 	state = GameState.TUTORIAL if tutorial in ["MOVE", "SWAP"] else GameState.PLAYING
 	event.emit("started", {})
@@ -154,6 +160,12 @@ func tick(delta: float) -> void:
 		var grill = grills[index]
 		grill.elapsed += delta
 		match grill.state:
+			GrillState.OPENING:
+				if clock >= grill.lid_open_at + LID_FADE_DURATION:
+					grill.version += 1
+					_set_state(index, GrillState.STABLE)
+					event.emit("lid_opened", {"grill": index})
+					_resolve(index)
 			GrillState.TRANSFERRING:
 				if grill.elapsed >= 0.20:
 					_set_state(index, GrillState.STABLE)
@@ -188,6 +200,8 @@ func _is_match(index: int) -> bool:
 	return slots[0] != "" and slots[0] == slots[1] and slots[1] == slots[2]
 
 func _resolve(index: int) -> void:
+	if grills[index].state in [GrillState.LOCKED, GrillState.OPENING]:
+		return
 	if _is_match(index):
 		_set_state(index, GrillState.MATCHING)
 		combo = combo + 1 if clock - last_match_at <= 2.0 else 1
@@ -195,6 +209,12 @@ func _resolve(index: int) -> void:
 		last_match_at = clock
 		matches += 1
 		event.emit("match", {"grill": index, "combo": combo, "double": simultaneous})
+		for locked_index in range(grills.size()):
+			var locked = grills[locked_index]
+			if locked.state == GrillState.LOCKED and locked.unlock_food == grills[index].slots[0]:
+				_set_state(locked_index, GrillState.OPENING)
+				locked.lid_open_at = clock + LID_OPEN_DELAY
+				event.emit("lid_opening", {"grill": locked_index})
 	elif grills[index].slots == ["", "", ""]:
 		_refill(index)
 
@@ -221,3 +241,40 @@ func is_cleared() -> bool:
 		if grill.state != GrillState.STABLE or grill.slots != ["", "", ""] or not grill.queue.is_empty():
 			return false
 	return true
+
+func hint_group() -> Array[Vector2i]:
+	# Read-only: choose three visible foods that can be assembled by legal swaps.
+	if state != GameState.PLAYING or not drag.is_empty(): return []
+	var available: Dictionary = {}
+	var unlock_foods: Array = []
+	for index in range(grills.size()):
+		if grills[index].state == GrillState.LOCKED:
+			unlock_foods.append(grills[index].unlock_food)
+		if not can_touch(index):
+			continue
+		for slot in range(3):
+			var food = grills[index].slots[slot]
+			if food != "":
+				if not available.has(food): available[food] = []
+				available[food].append(Vector2i(index, slot))
+	var best: Array[Vector2i] = []
+	var best_score = -1
+	for food in available:
+		if available[food].size() < 3: continue
+		for index in range(grills.size()):
+			if not can_touch(index): continue
+			var local: Array[Vector2i] = []
+			var outside: Array[Vector2i] = []
+			for cell in available[food]:
+				if cell.x == index: local.append(cell)
+				else: outside.append(cell)
+			if local.is_empty() or local.size() >= 3: continue
+			# One-move matches first; among equally short options prefer opening a lid.
+			var score = local.size() * 100 + (50 if food in unlock_foods else 0)
+			if score > best_score:
+				best_score = score
+				best = local.duplicate()
+				for cell in outside:
+					if best.size() == 3: break
+					best.append(cell)
+	return best

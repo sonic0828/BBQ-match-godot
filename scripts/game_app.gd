@@ -114,13 +114,20 @@ func _layout_game() -> void:
 	bottom_ui.position.y = height - 265
 	var top = height * 0.266
 	var available_height = bottom_ui.position.y - 24 - top
-	if model.grills.size() == 6:
+	board.scale = Vector2.ONE
+	if model.grills.size() == 10:
+		# Four rows, including the isolated covered grill. Scale only on short screens.
+		top = hint_panel.position.y + 96
+		available_height = bottom_ui.position.y - 24 - top
+		board.row_gap = maxf(212.0, (available_height - 236.0) / 3.0)
+		board.scale = Vector2.ONE * minf(1.0, available_height / (board.row_gap * 3.0 + 236.0))
+	elif model.grills.size() == 6:
 		board.row_gap = 260.0
 		top += maxf(0, (available_height - 480) * 0.5)
 	else:
 		board.row_gap = (available_height - 220) * 0.5
-	board.position = Vector2(0, top)
-	board.size = Vector2(720, bottom_ui.position.y - 24 - top)
+	board.position = Vector2((720 - 720 * board.scale.x) * 0.5, top)
+	board.size = Vector2(720, (bottom_ui.position.y - 24 - top) / board.scale.y)
 
 func _process(delta: float) -> void:
 	ui_clock += delta
@@ -162,6 +169,8 @@ func _notification(what: int) -> void:
 func _input(event: InputEvent) -> void:
 	if (event is InputEventMouseButton or event is InputEventScreenTouch) and event.pressed:
 		audio.unlock()
+	if current_page == "game" and board != null and (event is InputEventMouseButton or event is InputEventScreenTouch):
+		board.note_pointer(event.pressed)
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
@@ -350,6 +359,8 @@ func _update_hud(delta: float) -> void:
 	if model.clock >= toast_until:
 		if model.state == BoardModel.GameState.TUTORIAL:
 			hint_label.text = "拖动玉米，凑齐 3 个相同食材 · 计时暂停" if model.tutorial == "MOVE" else "拖到另一串食材上，交换位置 · 计时暂停"
+		elif model.grills.size() == 10 and model.grills[6].state == BoardModel.GrillState.LOCKED:
+			hint_label.text = "三消玉米，打开中间的锅盖"
 		else:
 			hint_label.text = "拖到食材上可交换，拖到空位可移动"
 
@@ -366,6 +377,7 @@ func _on_model_event(kind: String, detail: Dictionary) -> void:
 			haptics.set_game_paused(false)
 		"pick", "cancel": audio.play(kind)
 		"refill": audio.refill(model.grills[detail.grill].refill_foods.size())
+		"lid_opening": audio.schedule("lid", BoardModel.LID_OPEN_DELAY)
 		"transfer":
 			audio.play("move")
 			audio.schedule("swap" if detail.swap else "drop", 0.16)

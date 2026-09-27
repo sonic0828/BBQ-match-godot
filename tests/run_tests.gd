@@ -8,6 +8,7 @@ func _initialize() -> void:
 	_test_transactions()
 	_test_parallel_and_refill()
 	_test_timer_pause_and_chain()
+	_test_lids_and_hints()
 	_test_storage()
 	_test_playthroughs()
 	if failures.is_empty():
@@ -140,6 +141,95 @@ func _test_timer_pause_and_chain() -> void:
 	check(model.grills[0].slots == ["", "J", ""], "refill resumes correctly")
 	check(not model.is_cleared(), "victory inspects slots and queues, not progress count")
 
+func _test_lids_and_hints() -> void:
+	var config = LevelLoader.load_level(4)
+	var model = BoardModel.new()
+	var opens: Array = []
+	model.event.connect(func(kind, _detail):
+		if kind == "lid_opening": opens.append(true))
+	model.start(config)
+	var covered = model.grills[6].duplicate(true)
+	check(model.grills.size() == 10 and model.total_matches == 12 and model.remaining == 110, "level 4 adds one grill without increasing food or time")
+	check(not model.begin_drag(6, 0), "covered foods cannot be picked")
+	check(model.begin_drag(0, 0) and not model.drop(6, 0) and model.grills[0].slots[0] == "C", "drop onto lid cancels without losing source food")
+	check(not model.is_cleared(), "covered grill prevents premature victory")
+	check(move(model, 2, 2, 3, 2), "unrelated two matches can be made")
+	settle(model)
+	check(model.grills[6].state == covered.state and model.grills[6].slots == covered.slots and model.grills[6].queue == covered.queue and opens.is_empty(), "wrong foods do not reveal or consume covered food and tray")
+	check(move(model, 0, 2, 1, 2), "corn and sausage double match is legal")
+	settle(model, 0.21)
+	check(model.grills[6].state == BoardModel.GrillState.OPENING and opens.size() == 1, "corn match starts opening exactly once")
+	check(not model.can_touch(6) and model.matches == 4, "opening remains locally locked and adds no extra match")
+	settle(model, 0.35)
+	model.pause()
+	var frozen = model.grills.duplicate(true)
+	var clock = model.clock
+	model.tick(5)
+	check(model.clock == clock and model.grills == frozen, "pause freezes lid halfway through opening")
+	model.resume()
+	settle(model, 0.35)
+	check(model.can_touch(6) and model.grills[6].slots == covered.slots and model.grills[6].queue == covered.queue, "lid reveals existing food and preserves preview tray")
+	settle(model)
+	check(opens.size() == 1, "an opened lid never retriggers")
+	check(model.begin_drag(6, 0), "revealed food becomes draggable")
+	model.cancel_drag()
+	model.start(config)
+	check(model.grills[6].state == BoardModel.GrillState.LOCKED, "restart restores covered grill")
+	move(model, 0, 2, 1, 2)
+	settle(model, 0.21)
+	model.remaining = 0.001
+	model.tick(0.01)
+	clock = model.clock
+	model.tick(2)
+	check(model.state == BoardModel.GameState.FAIL and model.clock == clock and not model.can_touch(6), "timeout cancels opening interaction and freezes its clock")
+	var hidden_match = config.duplicate(true)
+	hidden_match.grills[6].initial = ["L", "L", "L"]
+	model.start(hidden_match)
+	check(model.matches == 0, "covered triple does not auto-match before unlock")
+	move(model, 0, 2, 1, 2)
+	settle(model, 1.5)
+	check(model.matches == 3 and model.grills[6].slots == ["", "J", ""], "revealed triple resolves once then refills normally")
+	var invalid = config.duplicate(true)
+	invalid.grills[6].unlockFood = "BAD"
+	check(not LevelLoader.validate(invalid).is_empty(), "unknown unlock food rejected")
+	model.start(config)
+	var before = model.grills.duplicate(true)
+	var hint = model.hint_group()
+	check(hint == [Vector2i(0, 0), Vector2i(0, 1), Vector2i(1, 2)], "equally short hints prioritize one-move corn unlock")
+	check(model.grills == before and model.matches == 0, "hint search is read-only")
+	model = fixture([["C", null, null], ["C", null, null], ["C", null, null]])
+	check(model.hint_group().size() == 3, "two-move visible triple receives a hint")
+	model = fixture([["C", null, null], ["C", null, null]], {0: [["C"]]})
+	check(model.hint_group().is_empty(), "hidden tray is never counted as selectable food")
+	model = fixture([["C", "C", "L"], ["C", "L", "L"]])
+	model.grills[1].state = BoardModel.GrillState.OPENING
+	check(model.hint_group().is_empty(), "opening and moving grills excluded from hint search")
+	model.grills[1].state = BoardModel.GrillState.STABLE
+	model.begin_drag(0, 0)
+	check(model.hint_group().is_empty(), "holding food suppresses hints")
+	model.pause()
+	check(model.hint_group().is_empty(), "paused board offers no hint")
+	for number in range(1, 11):
+		model = BoardModel.new()
+		model.start(LevelLoader.load_level(number))
+		model.state = BoardModel.GameState.PLAYING
+		settle(model)
+		hint = model.hint_group()
+		var playable = hint.size() == 3
+		if playable:
+			var target = hint[0].x
+			var food = model.grills[target].slots[hint[0].y]
+			var matches_before = model.matches
+			for cell in hint:
+				if cell.x == target: continue
+				for slot in range(3):
+					if model.grills[target].slots[slot] != food:
+						playable = move(model, cell.x, cell.y, target, slot) and playable
+						settle(model)
+						break
+			playable = playable and model.matches > matches_before
+		check(playable, "level %d suggested triple completes a match through actual moves" % number)
+
 func _test_storage() -> void:
 	var path = "/private/tmp/hotpot-test-progress.cfg"
 	var store = SaveStore.new()
@@ -203,7 +293,9 @@ func _test_playthroughs() -> void:
 
 func solver_step(model: BoardModel) -> bool:
 	var counts: Dictionary = {}
-	for grill in model.grills:
+	for index in range(model.grills.size()):
+		if not model.can_touch(index): continue
+		var grill = model.grills[index]
 		for food in grill.slots:
 			if food != "": counts[food] = counts.get(food, 0) + 1
 	var chosen = ""
@@ -212,6 +304,7 @@ func solver_step(model: BoardModel) -> bool:
 	for food in counts:
 		if counts[food] < 3: continue
 		for g in range(model.grills.size()):
+			if not model.can_touch(g): continue
 			var amount = model.grills[g].slots.count(food)
 			if amount > best:
 				best = amount
@@ -221,7 +314,7 @@ func solver_step(model: BoardModel) -> bool:
 		for slot in range(3):
 			if model.grills[destination].slots[slot] == chosen: continue
 			for g in range(model.grills.size()):
-				if g == destination: continue
+				if g == destination or not model.can_touch(g): continue
 				for s in range(3):
 					if model.grills[g].slots[s] == chosen:
 						return move(model, g, s, destination, slot)
@@ -229,6 +322,7 @@ func solver_step(model: BoardModel) -> bool:
 	var source = -1
 	var fewest = 4
 	for g in range(model.grills.size()):
+		if not model.can_touch(g): continue
 		var occupied = 3 - model.grills[g].slots.count("")
 		if not model.grills[g].queue.is_empty() and occupied < fewest:
 			source = g
@@ -237,7 +331,7 @@ func solver_step(model: BoardModel) -> bool:
 		for s in range(3):
 			if model.grills[source].slots[s] == "": continue
 			for g in range(model.grills.size()):
-				if g == source: continue
+				if g == source or not model.can_touch(g): continue
 				for t in range(3):
 					if model.grills[g].slots[t] == "":
 						return move(model, source, s, g, t)

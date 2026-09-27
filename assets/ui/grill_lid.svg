@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="444" height="312" viewBox="0 0 222 156">
+  <defs>
+    <linearGradient id="rim" x1="0" y1="0" x2="0.7" y2="1">
+      <stop stop-color="#8797a8"/><stop offset=".18" stop-color="#394658"/>
+      <stop offset=".5" stop-color="#1b2431"/><stop offset=".84" stop-color="#566274"/><stop offset="1" stop-color="#141c28"/>
+    </linearGradient>
+    <linearGradient id="metal" x1="0" y1="0" x2=".3" y2="1">
+      <stop stop-color="#536171"/><stop offset=".3" stop-color="#35404f"/>
+      <stop offset=".85" stop-color="#28323f"/><stop offset="1" stop-color="#1a222d"/>
+    </linearGradient>
+    <linearGradient id="brass" x2="0" y2="1">
+      <stop stop-color="#ffdaa0"/><stop offset=".45" stop-color="#b18a53"/><stop offset="1" stop-color="#654c33"/>
+    </linearGradient>
+  </defs>
+  <rect x="7" y="9" width="208" height="141" rx="33" fill="#101620"/>
+  <rect x="3" y="2" width="216" height="142" rx="34" fill="url(#rim)" stroke="#151e2b" stroke-width="2"/>
+  <rect x="11" y="10" width="200" height="124" rx="27" fill="url(#metal)" stroke="#8190a0" stroke-opacity=".55" stroke-width="1.5"/>
+  <path d="M26 42Q26 24 44 24H178Q196 24 196 42" fill="none" stroke="#afbdc9" stroke-opacity=".17" stroke-width="2"/>
+  <path d="M29 116Q33 124 45 124H177Q189 124 193 116" fill="none" stroke="#101923" stroke-width="2"/>
+  <ellipse cx="111" cy="63" rx="39" ry="9" fill="#101722" opacity=".65"/>
+  <rect x="77" y="51" width="14" height="12" rx="4" fill="#222a33"/>
+  <rect x="131" y="51" width="14" height="12" rx="4" fill="#222a33"/>
+  <path d="M84 56V48Q84 39 94 39H128Q138 39 138 48V56" fill="none" stroke="#171e27" stroke-width="12" stroke-linecap="round"/>
+  <path d="M84 54V48Q84 42 94 42H128Q138 42 138 48V54" fill="none" stroke="url(#brass)" stroke-width="8" stroke-linecap="round"/>
+  <path d="M90 45H132" stroke="#ffe8bd" stroke-opacity=".65" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M111 54V66" stroke="#c9a46f" stroke-width="2"/>
+  <rect x="89" y="65" width="44" height="67" rx="5" fill="#14202a" opacity=".45"/>
+  <rect x="89" y="62" width="44" height="67" rx="5" fill="#e6d7b8" stroke="#b58b50" stroke-width="2"/>
+  <rect x="93" y="66" width="36" height="59" rx="3" fill="#fff0d2" stroke="#cfb58b"/>
+</svg>

@@ -176,6 +176,15 @@ def clip(seconds, layers):
     return room(bus, .10)
 
 
+def render_lid():
+    # A quiet, short metal handle tap, without sampling the reference recording.
+    t = np.arange(int(SR * .32)) / SR
+    signal = sum(a * np.sin(2 * np.pi * f * t) * np.exp(-t * decay)
+                 for f, a, decay in [(840, 1, 24), (1431, .48, 33), (2287, .20, 48)])
+    signal *= (1 - np.exp(-t * 1500)) * np.minimum(1, (.32 - t) / .04)
+    return clip(.36, [(normalize(signal), 0, .16)])
+
+
 def render_effects():
     # Match impact is a separate clip: gameplay schedules it at the plate pop.
     pitch, bright = .96, .85
@@ -196,6 +205,7 @@ def render_effects():
         'win': clip(1.25, [(tone(note, .8, 'soft'), j * .095, .20)
                             for j, note in enumerate([69, 73, 76, 81])]),
         'fail': clip(.85, [(tone(64, .7, 'soft'), 0, .17), (tone(62, .65, 'soft'), .15, .15)]),
+        'lid': render_lid(),
     }
     return sounds
 
@@ -211,7 +221,7 @@ def main():
             write_wav(source, signal)
             subprocess.run(['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error', '-i', str(source),
                             '-ar', '22050', '-ac', '1', '-c:a', 'pcm_s16le', str(OUT / f'{name}.wav')], check=True)
-    print('Generated 41.74-second looping music and 12 original effects in', OUT)
+    print('Generated 41.74-second looping music and 13 original effects in', OUT)
 
 
 if __name__ == '__main__':

@@ -30,7 +30,7 @@ func _ready() -> void:
 		var player = AudioStreamPlayer.new()
 		add_child(player)
 		players.append(player)
-	for id in ["pick", "move", "drop", "swap", "cancel", "gather", "match", "combo", "refill", "warning", "win", "fail"]:
+	for id in ["pick", "move", "drop", "swap", "cancel", "gather", "match", "combo", "refill", "warning", "win", "fail", "lid"]:
 		sounds[id] = load("res://audio/%s.wav" % id)
 	music = AudioStreamPlayer.new()
 	music.stream = load("res://audio/night_market.ogg")

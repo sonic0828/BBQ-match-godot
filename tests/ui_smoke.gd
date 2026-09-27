@@ -82,6 +82,26 @@ func run() -> void:
 		await drag(source, target)
 		await create_timer(0.55).timeout
 		check(app.model.matches == 2, "drag coordinates remain correct at %s" % str(dimensions))
+		app._start_level(4)
+		await process_frame
+		var covered = app.board.grill_rect(6)
+		check(covered.get_center().x == app.board.grill_rect(1).get_center().x and covered.position.y > app.board.grill_rect(4).position.y and covered.position.y < app.board.grill_rect(8).position.y, "covered grill is alone in third row at %s" % str(dimensions))
+		var bottom = app.board.position.y + (app.board.plate_center(9).y + 24) * app.board.scale.y
+		check(bottom < app.bottom_ui.position.y and app.board.row_gap >= 212, "four rows and trays fit above tools without overlaps at %s" % str(dimensions))
+		source = app.board.get_global_transform_with_canvas() * app.board.slot_center(6, 0)
+		target = app.board.get_global_transform_with_canvas() * app.board.slot_center(0, 0)
+		await drag(source, target)
+		check(app.model.grills[6].slots == ["L", "C", "W"] and app.model.grills[0].slots[0] == "C", "touch cannot pull food through lid at %s" % str(dimensions))
+		source = app.board.get_global_transform_with_canvas() * app.board.slot_center(0, 2)
+		target = app.board.get_global_transform_with_canvas() * app.board.slot_center(1, 2)
+		await drag(source, target)
+		await create_timer(0.9).timeout
+		check(app.model.can_touch(6), "real corn swap opens scaled covered grill at %s" % str(dimensions))
+		source = app.board.get_global_transform_with_canvas() * app.board.slot_center(6, 0)
+		target = app.board.get_global_transform_with_canvas() * app.board.slot_center(0, 0)
+		await drag(source, target)
+		await create_timer(0.25).timeout
+		check(app.model.grills[0].slots[0] == "L", "revealed food uses correct scaled drag coordinates at %s" % str(dimensions))
 	app._show_home()
 	await create_timer(0.65).timeout
 	if failures.is_empty():

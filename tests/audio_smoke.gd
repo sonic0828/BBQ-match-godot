@@ -123,6 +123,15 @@ func run() -> void:
 	app.model.remaining = .001
 	app.model.tick(.01)
 	check(audio.pending.is_empty() and audio.last_played.has("fail"), "timeout cancels delayed combo audio before failure cue")
+	app._start_level(4)
+	app.model.begin_drag(0, 2)
+	app.model.drop(1, 2)
+	app.model.tick(0.21)
+	check(audio.pending.filter(func(cue): return cue.id == "lid").size() == 1, "corn unlock schedules one metal handle cue")
+	audio._process(0.26)
+	check(not audio.last_played.has("lid"), "lid sound waits for the plate impact")
+	audio._process(0.02)
+	check(audio.last_played.has("lid"), "lid sound starts with the cover fade")
 	app._show_home()
 	app._show_settings()
 	for arg in OS.get_cmdline_user_args():
