@@ -64,3 +64,9 @@ for (const platform of ['ios', 'android', 'devtools', 'mac']) {
         });
     }
 }
+
+test('微信文件读取失败会 reject，不再当作成功返回空数据', async () => {
+    const context = boot(patched, 'ios', { value: 3, writable: true });
+    context.fsUtils.fs.readFile = ({ fail }) => fail(new Error('package file missing'));
+    await assert.rejects(context.fsUtils.localFetch('/engine/bbq.bin'), /package file missing/);
+});

@@ -2,7 +2,14 @@
 module.exports = function configureRenderProbe(wx, root, options) {
     const platform = wx.getDeviceInfo().platform;
     const requested = options.androidRenderProbe || null;
-    const effective = platform === 'android' || platform === 'devtools' ? requested : null;
+    // Keep the phone-verified Android workaround in ordinary exports as well.
+    const effective = platform === 'android' || platform === 'devtools' ? requested || 'B' : null;
+    const iosProfile = platform === 'ios' ? options.iosStartupProfile || 'baseline' : null;
     if (effective === 'C') root.__GODOT_DISABLE_WXGLX = true;
-    return { requested, effective, skipLoaderRendering: effective === 'B' };
+    return {
+        requested, effective, iosProfile,
+        skipLoaderRendering: effective === 'B',
+        lightLoader: iosProfile === 'loader' || iosProfile === 'combined',
+        skipWasmRead: iosProfile === 'wasm' || iosProfile === 'combined',
+    };
 };

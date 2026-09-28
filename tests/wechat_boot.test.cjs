@@ -5,15 +5,21 @@ const vm = require('node:vm');
 const installBootDiagnostics = require('../platform/wechat/boot-diagnostics.js');
 
 function fixture(t, options = {}, flags = { isIOSHighPerformanceMode: true }, device = { platform: 'ios' }) {
-    t.mock.timers.enable({ apis: ['setTimeout'] });
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
     const handlers = {};
     const dialogs = [];
     const reports = [];
+    const storage = {};
+    const checkpoints = [];
     t.mock.method(console, 'log', (label, data) => {
         if (label === '[BBQ startup report]') reports.push(JSON.parse(data));
     });
     const wx = {
         getDeviceInfo: () => device,
+        getStorageSync: key => storage[key],
+        setStorageSync: (key, value) => { storage[key] = value; checkpoints.push(value); },
+        onMemoryWarning: callback => { handlers.memory = callback; },
+        offMemoryWarning: () => { delete handlers.memory; },
         getAppBaseInfo: () => ({ version: '8.0.78', SDKVersion: '3.17.3' }),
         showModal: options => dialogs.push(options),
         setClipboardData: () => assert.fail('启动诊断不应依赖剪贴板隐私权限'),
@@ -24,21 +30,18 @@ function fixture(t, options = {}, flags = { isIOSHighPerformanceMode: true }, de
     };
     const root = { ...flags };
     root.bbqBoot = installBootDiagnostics(wx, root, options);
-    return { root, handlers, dialogs, reports };
+    return { root, handlers, dialogs, reports, storage, checkpoints };
 }
 
-test('错误洪流后重新输出完整首错和次数，弹窗不调用需隐私声明的剪贴板', t => {
+test('慢启动仅记录错误汇总，不弹技术诊断窗', t => {
     const logged = [];
     t.mock.method(console, 'error', (...args) => logged.push(args));
     const { root, dialogs, reports } = fixture(t, { diagnostics: true });
     root.bbqBoot.printError('original startup failure');
     for (let i = 0; i < 1500; i++) root.bbqBoot.printError('repeated ObjectDB failure');
     t.mock.timers.tick(30000);
-    assert.match(dialogs[0].content, /首次：original startup failure/);
+    assert.equal(dialogs.length, 0);
     assert.equal(logged.length, 2);
-    assert.equal(dialogs[0].showCancel, false);
-    assert.equal(dialogs[0].confirmText, '知道了');
-    assert.equal(dialogs[0].success, undefined);
     const report = reports[0];
     assert.equal(report.errorCount, 1501);
     assert.equal(report.firstErrors[0].line, 'original startup failure');
@@ -60,22 +63,22 @@ for (const flags of [
     });
 }
 
-for (const corrupted of [false, true]) {
-    test(`核对预加载资源字节与当前 WASM 内存，资源损坏 ${corrupted}`, t => {
+for (const truncated of [false, true]) {
+    test(`轻量诊断只核对字节数，不在首帧前扫描 CRC，长度不符 ${truncated}`, t => {
         const { root, reports } = fixture(t, {
             diagnostics: true, pack: { bytes: 9, crc32: 'cbf43926' },
         });
-        const bytes = new Uint8Array([0, ...Buffer.from(corrupted ? '123456780' : '123456789'), 0]);
+        const bytes = new Uint8Array([0, ...Buffer.from(truncated ? '12345678' : '123456789'), 0]);
         const engine = {
-            preloader: { preloadedFiles: [{ path: '/engine/bbq.bin', buffer: bytes.subarray(1, 10) }] },
+            preloader: { preloadedFiles: [{ path: '/engine/bbq.bin', buffer: bytes.subarray(1, bytes.length - 1) }] },
             rtenv: { HEAPU8: new Uint8Array(1024) },
         };
         root.bbqBoot.inspectRuntime(engine);
         engine.rtenv.HEAPU8 = new Uint8Array(2048);
         t.mock.timers.tick(30000);
         const report = reports[0];
-        assert.equal(report.runtime.pack.matches, !corrupted);
-        assert.equal(report.runtime.pack.bytes, 9);
+        assert.equal(report.runtime.pack.sizeMatches, !truncated);
+        assert.equal(report.runtime.pack.bytes, truncated ? 8 : 9);
         assert.equal(report.runtime.wasmMemoryBytes, 2048);
         assert.equal(engine.preloader.preloadedFiles.length, 1);
     });
@@ -86,34 +89,35 @@ test('缺少运行时诊断字段不会阻止启动与首帧，观察结束只�
     root.bbqBoot.inspectRuntime({});
     root.bbqBoot.ready();
     root.bbqBoot.print('[BBQ first frame]');
-    t.mock.timers.tick(60000);
+    t.mock.timers.tick(120000);
     assert.equal(reports[0].firstFrame, true);
     assert.equal(dialogs.length, 0);
     assert.deepEqual(handlers, {});
 });
 
 test('手机未处理的启动异常会显示错误与运行环境，重复上报只显示一次', t => {
-    const { root, handlers, dialogs } = fixture(t);
+    const { root, handlers, dialogs, reports } = fixture(t);
     root.bbqBoot.stage('初始化游戏引擎与食材资源');
     const onError = handlers.error;
     handlers.rejection({ reason: new Error('WASM compile failed') });
     onError('same failure');
     assert.equal(dialogs.length, 1);
-    assert.match(dialogs[0].content, /WASM compile failed/);
-    assert.match(dialogs[0].content, /初始化游戏引擎与食材资源/);
-    assert.match(dialogs[0].content, /ios.*8\.0\.78.*3\.17\.3/);
-    assert.match(dialogs[0].content, /高性能模式/);
+    assert.match(reports[0].detail, /WASM compile failed/);
+    assert.match(reports[0].phase, /初始化游戏引擎与食材资源/);
+    assert.match(reports[0].environment, /ios.*8\.0\.78.*3\.17\.3/);
+    assert.equal(dialogs[0].content, '请退出小游戏后重新打开。');
     assert.deepEqual(handlers, {});
 });
 
 test('引擎 Promise 完成不代表首帧成功，超时报告 Godot stderr', t => {
-    const { root, dialogs } = fixture(t);
+    const { root, dialogs, reports } = fixture(t);
     root.bbqBoot.ready();
     root.bbqBoot.printError('ERROR: Unable to create OpenGL context');
     t.mock.timers.tick(30000);
-    assert.equal(dialogs.length, 1);
-    assert.match(dialogs[0].content, /引擎 已启动.*场景 未确认.*首帧 未确认/);
-    assert.match(dialogs[0].content, /Unable to create OpenGL context/);
+    assert.equal(dialogs.length, 0);
+    assert.equal(reports[0].engineStarted, true);
+    assert.equal(reports[0].firstFrame, false);
+    assert.match(reports[0].firstErrors[0].line, /Unable to create OpenGL context/);
 });
 
 for (const frameFirst of [false, true]) {
@@ -140,7 +144,7 @@ test('诊断包显示首帧与实际 WebGL 缓冲尺寸，不修改或重绘画�
     root.bbqBoot.ready();
     root.bbqBoot.print('[BBQ scene ready] (720, 1565)');
     root.bbqBoot.print('[BBQ first frame]');
-    t.mock.timers.tick(60000);
+    t.mock.timers.tick(120000);
     assert.equal(dialogs.length, 0);
     assert.equal(reports[0].build, 'render-test');
     assert.equal(reports[0].firstFrame, true);
@@ -148,7 +152,7 @@ test('诊断包显示首帧与实际 WebGL 缓冲尺寸，不修改或重绘画�
     assert.match(reports[0].rendering, /缓冲 1206×2622.*丢失 false.*GL 0/);
 });
 
-test('首帧后的微信异常、Promise 拒绝与 Godot 错误持续汇总 60 秒，不弹窗且不延长观察窗口', t => {
+test('首帧后的微信异常、Promise 拒绝与 Godot 错误持续汇总 120 秒，不弹窗且不延长观察窗口', t => {
     const logged = [];
     t.mock.method(console, 'error', (...args) => logged.push(args));
     const { root, handlers, dialogs, reports } = fixture(t, { diagnostics: true });
@@ -162,13 +166,13 @@ test('首帧后的微信异常、Promise 拒绝与 Godot 错误持续汇总 60 �
     root.bbqBoot.ready();
     assert.equal(dialogs.length, 0);
     assert.equal(reports.length, 0);
-    t.mock.timers.tick(29999);
+    t.mock.timers.tick(89999);
     assert.equal(reports.length, 0);
     t.mock.timers.tick(1);
     assert.equal(reports.length, 1);
     assert.equal(reports[0].errorCount, 102);
     assert.equal(reports[0].errorStats[0].count, 100);
-    assert.equal(reports[0].observationMs, 60000);
+    assert.equal(reports[0].observationMs, 120000);
     assert.equal(logged.length, 3);
     assert.deepEqual(handlers, {});
     assert.equal(dialogs.length, 0);
@@ -196,7 +200,7 @@ test('诊断区分迟到 render 调用和实际绘制，记录多实例及上下
     root.bbqBoot.loaderEvent(loader, 'draw'); // Simulate an actual lifecycle violation.
     root.bbqBoot.loaderEvent({ config: { skipRendering: true } }, 'created');
     listeners.webglcontextlost({ type: 'webglcontextlost' });
-    t.mock.timers.tick(60000);
+    t.mock.timers.tick(120000);
     const report = reports[0];
     assert.equal(report.loaderInstances, 2);
     assert.equal(report.loaders[0].draws, 2);
@@ -213,21 +217,54 @@ test('诊断区分迟到 render 调用和实际绘制，记录多实例及上下
     assert.deepEqual(listeners, {});
 });
 
-const entry = readFileSync(new URL('../platform/wechat/engine-entry.js', `file://${__filename}`), 'utf8')
-    .replace(/^import .*\n/gm, '');
+const entry = readFileSync(new URL('../platform/wechat/engine-entry.js', `file://${__filename}`), 'utf8');
+
+test('45 秒首帧仍被记录，超时不会解除监听或阻止后续观察', t => {
+    const { root, reports, dialogs, handlers, checkpoints } = fixture(t, { diagnostics: true, build: 'slow' });
+    t.mock.timers.tick(30000);
+    assert.equal(reports.length, 1);
+    assert.equal(dialogs.length, 0);
+    assert.equal(typeof handlers.error, 'function');
+    t.mock.timers.tick(15000);
+    root.bbqBoot.ready();
+    root.bbqBoot.print('[BBQ first frame]');
+    root.bbqBoot.print('[BBQ frame sample] {"fps":30,"frames_over_50ms":2}');
+    handlers.memory({});
+    root.bbqBoot.visibility(false);
+    assert.equal(checkpoints.at(-1).foreground, false);
+    root.bbqBoot.visibility(true);
+    t.mock.timers.tick(120000);
+    assert.equal(reports[1].firstFrameElapsedMs, 45000);
+    assert.equal(reports[1].frameSamples[0].fps, 30);
+    assert.equal(reports[1].memoryWarnings.length, 1);
+    assert.equal(checkpoints.at(-1).status, 'observed');
+    assert.equal(dialogs.length, 0);
+    assert.deepEqual(handlers, {});
+});
+
+test('普通包同样不因超过 30 秒弹窗，仍可完成启动', t => {
+    const { root, dialogs, reports, checkpoints } = fixture(t);
+    t.mock.timers.tick(50000);
+    root.bbqBoot.ready();
+    root.bbqBoot.print('[BBQ first frame]');
+    assert.equal(dialogs.length, 0);
+    assert.equal(reports.at(-1).firstFrameElapsedMs, 50000);
+    assert.equal(checkpoints.length, 0);
+});
 
 for (const kind of ['throw', 'init-reject', 'pack-reject', 'start-reject', 'exit', 'success']) {
     test(`引擎入口 ${kind} 的结果会正确处理`, async t => {
-        const { root, handlers, dialogs } = fixture(t);
+        const { root, handlers, dialogs, reports } = fixture(t);
         let cleaned = false;
         root.godotLoader = {
-            config: { textConfig: { compilingText: 'compiling' } },
+            config: { textConfig: { compilingText: 'compiling', initText: 'creating' } },
+            setStage() {},
             cleanup() { cleaned = true; },
         };
         const canvas = {};
         const sdk = {};
         vm.runInNewContext(entry, {
-            GameGlobal: root, GODOTSDK: sdk, canvas,
+            GameGlobal: root, GODOTSDK: sdk, canvas, require() {},
             Engine: class {
                 constructor(options) {
                     if (kind === 'throw') throw new Error('constructor failure');
@@ -262,7 +299,7 @@ for (const kind of ['throw', 'init-reject', 'pack-reject', 'start-reject', 'exit
             assert.deepEqual(handlers, {});
         } else {
             assert.equal(dialogs.length, 1);
-            assert.match(dialogs[0].content, /failure|退出码 1/);
+            assert.match(reports[0].detail, /failure|退出码 1/);
         }
     });
 }

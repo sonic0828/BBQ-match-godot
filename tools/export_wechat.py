@@ -36,7 +36,54 @@ def patch_wechat_sdk(source):
               '}catch(e){console.warn(e)}')
     if source.count(legacy) != 1:
         raise ValueError('微信 SDK 像素比例补丁与模板不匹配，请重新检查模板。')
-    return source.replace(legacy, warning + ';')
+    source = source.replace(legacy, warning + ';')
+    read = 'r.readFile({filePath:e,complete:e=>{t(e.data)}})'
+    if source.count(read) != 1:
+        raise ValueError('微信 SDK 文件读取补丁与模板不匹配。')
+    return source.replace(read, 'r.readFile({filePath:e,success:e=>t(e.data),fail:s})')
+
+
+def patch_wechat_engine(source):
+    replacements = {
+        'Module["instantiateWasm"](info,(mod,inst)=>{resolve(receiveInstance(mod,inst))})':
+            'Module["instantiateWasm"](info,(mod,inst)=>{resolve(receiveInstance(mod,inst))},reject)',
+        "'instantiateWasm': function (imports, onSuccess) {": """'instantiateWasm': function (imports, onSuccess, onFailure) {
+                const boot = GameGlobal.bbqBoot;
+                if (boot) boot.mark('wasm-instantiate:start');""",
+        "\t\t\t\t\tonSuccess(result['instance'], result['module']);": """                    if (boot) boot.mark('wasm-instantiate:ready');
+                    onSuccess(result['instance'], result['module']);""",
+        'WebAssembly.instantiateStreaming(Promise.resolve(r), imports).then(done);':
+            'WebAssembly.instantiateStreaming(Promise.resolve(r), imports).then(done, onFailure);',
+        'WebAssembly.instantiate(loadPath + ".wasm.br", imports).then(done);':
+            'WebAssembly.instantiate(loadPath + ".wasm.br", imports).then(done, onFailure);',
+        '\t\t\tloadPromise = preloader.loadPromise(`${loadPath}.wasm.br`, size, true);': """            const probe = GameGlobal.bbqRenderProbe || {};
+            const nativePath = typeof WXWebAssembly !== 'undefined' && WebAssembly === WXWebAssembly
+                && typeof WebAssembly.instantiateStreaming === 'undefined';
+            const skipRead = probe.skipWasmRead && nativePath;
+            const boot = GameGlobal.bbqBoot;
+            if (boot) boot.mark('wasm-read:start', { skipped: !!skipRead });
+            loadPromise = (skipRead ? Promise.resolve({})
+                : preloader.loadPromise(`${loadPath}.wasm.br`, size, true)).then(value => {
+                if (boot) boot.mark('wasm-read:ready', { skipped: !!skipRead });
+                return value;
+            });""",
+    }
+    for before, after in replacements.items():
+        if source.count(before) != 1:
+            raise ValueError('微信引擎启动补丁与固定模板不匹配。')
+        source = source.replace(before, after)
+    start = source.index('\t\t\t\tfunction doInit(promise) {')
+    end = source.index('\t\t\t\tpreloader.setProgressFunc', start)
+    source = source[:start] + """                function doInit(promise) {
+                    return promise.then(response => Godot(me.config.getModuleConfig(loadPath, response.data)))
+                        .then(module => module['initFS'](me.config.persistentPaths).then(error => {
+                            if (error) throw error;
+                            me.rtenv = module;
+                            if (me.config.unloadAfterInit) Engine.unload();
+                        }));
+                }
+""" + source[end:]
+    return source
 
 
 def patch_wechat_loader(source):
@@ -52,13 +99,20 @@ def patch_wechat_loader(source):
         'this.offScreenCanvas = document.createElement("canvas");':
             'this.offScreenCanvas = config.skipRendering ? null : document.createElement("canvas");',
         'this.currentText = config.textConfig.firstStartText;':
-            'this.currentText = config.textConfig.firstStartText;\n            reportLoaderEvent(this, "created");',
+            '''this.currentText = config.textConfig.firstStartText;
+            this.progress = null;
+            this.downloadComplete = false;
+            this.preparing = false;
+            this.images = [];
+            this.renderTask = null;
+            reportLoaderEvent(this, "created");''',
         '            this.initWebGL();': '            if (!config.skipRendering) this.initWebGL();',
         '            this.loadImages();': '            if (!config.skipRendering) this.loadImages();',
         '            this.offScreenCanvas.width = width * this.dpr;\n            this.offScreenCanvas.height = height * this.dpr;':
             '''            if (this.offScreenCanvas) {
-                this.offScreenCanvas.width = width * this.dpr;
-                this.offScreenCanvas.height = height * this.dpr;
+                this.renderDpr = this.config.lightRendering ? 1 : this.dpr;
+                this.offScreenCanvas.width = Math.round(width * this.renderDpr);
+                this.offScreenCanvas.height = Math.round(height * this.renderDpr);
             }''',
         '        render() {': '''        render() {
             reportLoaderEvent(this, "render");
@@ -72,11 +126,118 @@ def patch_wechat_loader(source):
             if (this.disposed) return;
             this.disposed = true;
             reportLoaderEvent(this, "cleanup");''',
+        '            this.program = this.createProgram(vertexShader, fragmentShader);': '''            this.program = this.createProgram(vertexShader, fragmentShader);
+            this.gl.deleteShader(vertexShader);
+            this.gl.deleteShader(fragmentShader);''',
+        '            const image = new Image();': '''            const image = new Image();
+            this.images.push(image);''',
+        '            image.onload = () => {': '            image.onload = () => {\n                if (this.disposed) return;',
+        '            image.onerror = (event) => {': '            image.onerror = (event) => {\n                if (this.disposed) return;',
+        '            this.loadImage(materialConfig.iconImage, "icon", (image) => {':
+            '            if (this.config.iconConfig.visible) this.loadImage(materialConfig.iconImage, "icon", (image) => {',
+        '''            const barY =
+                height -
+                iconConfig.bottom * this.dpr -
+                iconConfig.height * this.dpr -
+                30 * this.dpr -
+                barConfig.height * this.dpr;''': '''            const info = this.getWindowInfo() || {};
+            const safe = info.safeArea || {};
+            const top = Math.max(0, Number(safe.top) || 0) * this.dpr;
+            const bottom = Math.min(height, (Number(safe.bottom) || height / this.dpr) * this.dpr);
+            const barY = top + (bottom - top) * 0.78;''',
+        '            if (this.progress > 0) {': '            if (this.progress === null || this.progress > 0) {',
+        '(barConfig.width * this.dpr - 2 * barConfig.padding * this.dpr) * this.progress':
+            '(barConfig.width * this.dpr - 2 * barConfig.padding * this.dpr) * (this.progress === null ? 0.22 : this.progress)',
+        '                    barX + barConfig.padding * this.dpr,':
+            '                    this.progress === null ? (width - progressWidth) / 2 : barX + barConfig.padding * this.dpr,',
+        '            ctx.fillText(this.currentText, width / 2, barY + (barConfig.height * this.dpr) / 2);': '''            const caption = this.currentText + (this.progress === null ? " …" : ` · 下载 ${Math.round(this.progress * 100)}%`);
+            ctx.fillText(caption, width / 2, barY - 20 * this.dpr);''',
+        'value > 1 ? value / 100 : value': 'value',
+        '''            const normalized = this.normalizeProgress(progress);
+            this.progress = Math.max(this.progress || 0, normalized);''': '''            if (this.disposed || this.preparing) return;
+            const normalized = this.normalizeProgress(progress);
+            this.progress = Math.max(this.progress || 0, normalized);''',
+        '''
+            if (typeof windowObject.requestAnimationFrame === "function") {
+                windowObject.requestAnimationFrame(() => this.render());
+            }''': '',
+        '''            const task = wxApi.loadSubpackage({''': '''            if (gameGlobal.bbqBoot) gameGlobal.bbqBoot.mark("subpackage:start");
+            const task = wxApi.loadSubpackage({''',
+        '''                    this.progress = 1;
+                    this.updateProgress(this.progress, this.config.textConfig.initText);''': '''                    this.downloadComplete = true;
+                    if (gameGlobal.bbqBoot) gameGlobal.bbqBoot.mark("subpackage:ready");
+                    // The package entry may already have started the engine.
+                    if (!this.preparing) this.setStage(this.config.textConfig.compilingText);''',
+        '''                },
+            });
+
+            if (task && typeof task.onProgressUpdate''': '''                },
+                fail: error => { if (gameGlobal.bbqBoot) gameGlobal.bbqBoot.fail(error); },
+            });
+
+            if (task && typeof task.onProgressUpdate''',
+        '''                    this.updateProgress(progress, this.config.textConfig.downloadingText[0]);''': '''                    if (!this.downloadComplete) {
+                        this.updateProgress(progress / 100, this.config.textConfig.downloadingText[0]);
+                        if (progress >= 100) {
+                            this.downloadComplete = true;
+                            if (gameGlobal.bbqBoot) gameGlobal.bbqBoot.mark("subpackage:downloaded");
+                            this.setStage(this.config.textConfig.compilingText);
+                        }
+                    }''',
+        '''            windowObject.removeEventListener("resize", this.resizeHandler);
+
+            if (!this.gl)''': '''            windowObject.removeEventListener("resize", this.resizeHandler);
+            if (this.renderTask !== null) {
+                if (this.config.lightRendering || !windowObject.cancelAnimationFrame) clearTimeout(this.renderTask);
+                else windowObject.cancelAnimationFrame(this.renderTask);
+                this.renderTask = null;
+            }
+            for (const image of this.images) { image.onload = null; image.onerror = null; }
+            this.images.length = 0;
+            this.backgroundImage = this.iconImage = null;
+            if (this.offScreenCanvas) {
+                this.offScreenCanvas.width = this.offScreenCanvas.height = 1;
+                this.offScreenCanvas = null;
+            }
+
+            if (!this.gl)''',
+        '''            this.gl.clearColor(0, 0, 0, 0);
+            this.gl.clear(this.gl.COLOR_BUFFER_BIT);''': '''            // Preserve the last loading frame until Godot presents its own frame.
+            // Never draw/resize this shared canvas after handing it to the engine.
+            this.program = this.positionBuffer = this.texCoordBuffer = this.texture = null;''',
     }
     for before, after in replacements.items():
         if source.count(before) != 1:
             raise ValueError('微信加载器生命周期补丁与模板不匹配，请重新检查模板。')
         source = source.replace(before, after)
+    # Rendering uses its own backing resolution; never lower Godot's canvas DPR here.
+    begin, end = source.index('        render() {'), source.index('        renderToWebGL() {')
+    source = source[:begin] + source[begin:end].replace('this.dpr', 'this.renderDpr') + source[end:]
+    source = source.replace('this.render();', 'this.requestRender();')
+    source = source.replace('            this.requestRender();\n            this.loadGameEngine();',
+                            '            this.render();\n            this.loadGameEngine();')
+    source = source.replace('        render() {', '''        setStage(text) {
+            if (this.disposed) return;
+            this.preparing = true;
+            this.progress = null;
+            this.currentText = text;
+            this.requestRender();
+        }
+
+        requestRender() {
+            if (this.disposed || this.config.skipRendering || this.renderTask !== null) return;
+            const callback = () => {
+                this.renderTask = null;
+                this.render();
+            };
+            if (!this.config.lightRendering && windowObject.requestAnimationFrame && windowObject.cancelAnimationFrame) {
+                this.renderTask = windowObject.requestAnimationFrame(callback);
+            } else {
+                this.renderTask = setTimeout(callback, this.config.lightRendering ? 100 : 16);
+            }
+        }
+
+        render() {''')
     return source
 
 
@@ -89,11 +250,15 @@ def main():
     parser.add_argument('--preset', default='WeChat Resources')
     parser.add_argument('--output', type=Path, default=ROOT / 'build/wechat')
     parser.add_argument('--zip', action='store_true', help='额外生成 ZIP 压缩包；仅在明确需要时使用')
-    parser.add_argument('--diagnostics', action='store_true', help='采集首帧后 60 秒渲染诊断并输出日志；仅用于排查预览包')
+    parser.add_argument('--diagnostics', action='store_true', help='采集启动阶段与首帧后 120 秒诊断；仅用于排查预览包')
+    parser.add_argument('--ios-startup-profile', choices=('baseline', 'loader', 'wasm', 'combined'),
+                        default='baseline', help='iOS 单变量启动对照；普通导出保持 baseline')
+    parser.add_argument('--startup-minimal', action='store_true', help='导出同引擎最小场景，仅用于测量启动下限')
     parser.add_argument('--android-render-probe', choices=('A', 'B', 'C'),
                         help='安卓渲染对照（自动开启诊断）：A 原路径，B 跳过 Loading 绘制，C 标准 WebGL2；iOS 保持原路径')
     args = parser.parse_args()
-    args.diagnostics = args.diagnostics or args.android_render_probe is not None
+    args.diagnostics = (args.diagnostics or args.android_render_probe is not None
+                        or args.ios_startup_profile != 'baseline' or args.startup_minimal)
     if len(args.appid) != 18 or not args.appid.startswith('wx'):
         parser.error('AppID 必须为 wx 开头的 18 位字符串。')
     engine_version = subprocess.check_output([args.godot, '--version'], text=True).strip()
@@ -122,6 +287,8 @@ def main():
             config = json.loads(archive.read('project.config.json'))
         sdk = stage / 'engine/godot-sdk.js'
         sdk.write_text(patch_wechat_sdk(sdk.read_text()))
+        engine_script = stage / 'engine/godot.js'
+        engine_script.write_text(patch_wechat_engine(engine_script.read_text()))
         loader = stage / 'godot-loader.js'
         loader.write_text(patch_wechat_loader(loader.read_text()))
         build_id = datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -147,7 +314,8 @@ def main():
         shutil.copy2(ROOT / 'platform/wechat/THIRD_PARTY_NOTICES.txt', stage / 'THIRD_PARTY_NOTICES.txt')
         shutil.copy2(ROOT / 'platform/wechat/engine-entry.js', stage / 'engine/game.js')
         log = output.parent / 'wechat-export.log'
-        subprocess.run([args.godot, '--headless', '--path', str(args.project.resolve()),
+        project = ROOT / 'tests/fixtures/wechat_startup' if args.startup_minimal else args.project.resolve()
+        subprocess.run([args.godot, '--headless', '--path', str(project),
                         '--export-pack', args.preset, str(stage / 'engine/bbq.pck'),
                         '--log-file', str(log)], check=True)
         pack = stage / 'engine/bbq.pck'
@@ -158,6 +326,7 @@ def main():
         (stage / 'boot-options.js').write_text('module.exports = ' + json.dumps({
             'diagnostics': args.diagnostics, 'build': build_id,
             'androidRenderProbe': args.android_render_probe,
+            'iosStartupProfile': args.ios_startup_profile, 'minimal': args.startup_minimal,
             'pack': {'bytes': pack.stat().st_size, 'crc32': f'{zlib.crc32(pack.read_bytes()):08x}'},
         }) + ';\n')
         sizes = {str(p.relative_to(stage)): p.stat().st_size for p in sorted(stage.rglob('*')) if p.is_file() and not p.name.startswith('.')}
@@ -166,9 +335,11 @@ def main():
             'appid': args.appid, 'godot': engine_version,
             'template': URL, 'template_sha256': SHA256,
             'runtime_patches': ['sdk-preserve-device-pixel-ratio', 'loader-stop-after-cleanup',
-                                'loader-render-probe'],
+                                'loader-render-probe', 'loader-progress-and-release',
+                                'sdk-file-read-errors', 'engine-startup-probes'],
             'diagnostics': args.diagnostics, 'build': build_id,
             'android_render_probe': args.android_render_probe,
+            'ios_startup_profile': args.ios_startup_profile, 'startup_minimal': args.startup_minimal,
             'total_bytes': total, 'files': sizes,
         })
         # Only replace our generated directory; never clean an arbitrary output.

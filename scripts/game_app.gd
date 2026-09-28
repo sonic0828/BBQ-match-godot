@@ -40,8 +40,16 @@ var bag_dialog: BagDialog
 var center_toast: Panel
 var center_toast_until = 0.0
 var daily_check = 0.0
+var startup_sampling = false
+var startup_sample_last_usec = 0
+var startup_sample_seconds = 0.0
+var startup_sample_frames = 0
+var startup_sample_slow_frames = 0
+var startup_sample_max_delta = 0.0
+var startup_sample_count = 0
 
 func _ready() -> void:
+	startup_sampling = OS.has_feature("wechat") and "--startup-diagnostics" in OS.get_cmdline_user_args()
 	font = load("res://assets/fonts/game.ttf")
 	var theme_resource = Theme.new()
 	theme_resource.default_font = font
@@ -140,6 +148,27 @@ func _layout_game() -> void:
 	board.size = Vector2(720, (bottom_ui.position.y - 24 - top) / board.scale.y)
 
 func _process(delta: float) -> void:
+	if startup_sampling:
+		var now_usec = Time.get_ticks_usec()
+		if startup_sample_last_usec > 0:
+			var elapsed = float(now_usec - startup_sample_last_usec) / 1000000.0
+			startup_sample_seconds += elapsed
+			startup_sample_frames += 1
+			startup_sample_max_delta = maxf(startup_sample_max_delta, elapsed)
+			if elapsed > 0.05:
+				startup_sample_slow_frames += 1
+		startup_sample_last_usec = now_usec
+		if startup_sample_seconds >= 10.0:
+			print("[BBQ frame sample] ", JSON.stringify({"page": current_page,
+				"fps": startup_sample_frames / startup_sample_seconds,
+				"frames_over_50ms": startup_sample_slow_frames,
+				"max_frame_ms": startup_sample_max_delta * 1000.0}))
+			startup_sample_seconds = 0.0
+			startup_sample_frames = 0
+			startup_sample_slow_frames = 0
+			startup_sample_max_delta = 0.0
+			startup_sample_count += 1
+			startup_sampling = startup_sample_count < 12
 	ui_clock += delta
 	if is_instance_valid(center_toast) and ui_clock >= center_toast_until:
 		center_toast.queue_free()
@@ -173,6 +202,7 @@ func _capture() -> void:
 
 func _notification(what: int) -> void:
 	if what in [NOTIFICATION_APPLICATION_FOCUS_OUT, NOTIFICATION_APPLICATION_PAUSED]:
+		startup_sample_last_usec = 0
 		if audio != null:
 			audio.set_backgrounded(true)
 		if haptics != null:
@@ -180,6 +210,7 @@ func _notification(what: int) -> void:
 		if current_page == "game" and model != null and model.active():
 			_pause()
 	elif what in [NOTIFICATION_APPLICATION_FOCUS_IN, NOTIFICATION_APPLICATION_RESUMED]:
+		startup_sample_last_usec = 0
 		if audio != null:
 			audio.set_backgrounded(false)
 		if haptics != null:

@@ -1,5 +1,9 @@
 # 微信小游戏导出
 
+## iPhone 启动与稳定性（2026-09-28）
+
+当前优化分支提供轻量 Loading、真实下载进度、辅助资源释放、启动阶段计时和同引擎最小场景。30 秒慢启动不再弹技术诊断窗口，仍继续等待首帧。诊断包首帧后观察 120 秒。具体导出参数、限制和手机验收步骤见 [iPhone 启动优化](ios_startup_optimization.md)。当前两台 iPhone 的 15～20 秒目标和微信整体退出问题仍待新包真机验证。
+
 ## 安卓 Loading 闪屏对照（2026-09-28）
 
 OPPO Find N3 Flip（用户报告 Android 16 / ColorOS 16.05、微信 8.0.74、基础库 3.16.3）在构建 `20260926-223440` 进入首页后闪回 Loading 文案，vConsole 开关不影响复现。日志在场景／首帧成功后出现 `WAPixi.js` 的 `vertex_attrib` 属性不匹配。iPhone 16 Pro 同构建正常；两端均使用 EmscriptenGLX。根因仍待真机对照，不能仅凭堆栈认定资源漏导出或已修复。
@@ -12,11 +16,11 @@ OPPO Find N3 Flip（用户报告 Android 16 / ColorOS 16.05、微信 8.0.74、�
 | `python3 tools/export_wechat.py --android-render-probe B` | 跳过 Loading 辅助 Canvas、图片和 GL 初始化／绘制，保留分包加载、DPR 和主画布尺寸 | 判断自定义 Loading 是否为触发条件；进入首页前短暂空白是预期行为 |
 | `python3 tools/export_wechat.py --android-render-probe C` | 保留 Loading，在首次创建上下文前强制标准 WebGL2 | 判断问题是否依赖 WXGLX |
 
-iOS 不应用这三个安卓选项，保持原 Loading 与模板渲染路径，并在报告中标记 `effective=null`。普通导出不加参数，保持原平台策略，不自动为全部安卓关闭 WXGLX。三个对照应使用同一源码／模板／游戏资源，核对报告中的资源字节数与 CRC32；`export-info.json` 和 `boot-options.js` 标记构建号及对照组。
+iOS 不应用这三个安卓选项，并在报告中标记 `effective=null`；iOS 实验由独立的 `--ios-startup-profile` 控制。用户随后确认 OPPO 的 B 包预览正常，当前普通导出对安卓／开发者工具默认保留 B，但不强制关闭 WXGLX。三个安卓对照应使用同一源码／模板／游戏资源，核对构建清单中的资源字节数与 CRC32；`export-info.json` 和 `boot-options.js` 标记构建号及对照组。
 
-诊断包首帧后持续采集 60 秒，结束仅输出 `[BBQ startup report]` JSON，不弹窗、不创建额外诊断画布。启动失败／30 秒未确认首帧仍保留原有一次错误提示。报告记录机型、系统、实际渲染路径、首帧时间、加载器实例数、清理及最后绘制时间、旧文案、清理／首帧后的实际绘制次数和上下文事件。`renderCallsAfterCleanup` 仅代表被拦截的迟到调用，不能当作发生实际绘制；看 `drawsAfterCleanup` 和 `drawsAfterFirstFrame`。`[BBQ loader cleanup]` 提供提前可读的交接记录。B 组没有加载器 GL 引用，不为诊断额外请求上下文，报告可缺少缓冲和 GL 错误读数。
+诊断包首帧后持续采集 120 秒，结束仅输出 `[BBQ startup report]` JSON，不弹窗、不创建额外诊断画布。30 秒未确认首帧只记录慢启动，真正启动失败才显示简短重试提示。报告记录机型、系统、实际渲染路径、首帧时间、加载器实例数、清理及最后绘制时间、旧文案、清理／首帧后的实际绘制次数和上下文事件。`renderCallsAfterCleanup` 仅代表被拦截的迟到调用，不能当作发生实际绘制；看 `drawsAfterCleanup` 和 `drawsAfterFirstFrame`。`[BBQ loader cleanup]` 提供提前可读的交接记录。B 组没有加载器 GL 引用，不为诊断额外请求上下文，报告可缺少缓冲和 GL 错误读数。
 
-同一手机每组完整重启小游戏，首页停留至少 60 秒后导出日志，再验证关卡、前后台和旧文案是否复现。只有 B 稳定则优先研究 Loading 交接；只有 C 稳定则评估安卓 WebGL2 兼容策略与性能；两组都失败则继续做最小场景／模板对照。模拟器或单元测试通过不代表该 OPPO 真机闪屏已解决。
+同一手机每组完整重启小游戏，首页停留至少 120 秒后导出日志，再验证关卡、前后台和旧文案是否复现。只有 B 稳定则优先研究 Loading 交接；只有 C 稳定则评估安卓 WebGL2 兼容策略与性能；两组都失败则继续做最小场景／模板对照。模拟器或单元测试通过不能代替 OPPO 真机回归。
 
 ## 轻震反馈（2026-09-26）
 
