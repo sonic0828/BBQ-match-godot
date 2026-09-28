@@ -4,7 +4,7 @@ const { test } = require('node:test');
 const vm = require('node:vm');
 const installBootDiagnostics = require('../platform/wechat/boot-diagnostics.js');
 
-function fixture(t, options = {}, flags = { isIOSHighPerformanceMode: true }) {
+function fixture(t, options = {}, flags = { isIOSHighPerformanceMode: true }, device = { platform: 'ios' }) {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const handlers = {};
     const dialogs = [];
@@ -13,7 +13,7 @@ function fixture(t, options = {}, flags = { isIOSHighPerformanceMode: true }) {
         if (label === '[BBQ startup report]') reports.push(JSON.parse(data));
     });
     const wx = {
-        getDeviceInfo: () => ({ platform: 'ios' }),
+        getDeviceInfo: () => device,
         getAppBaseInfo: () => ({ version: '8.0.78', SDKVersion: '3.17.3' }),
         showModal: options => dialogs.push(options),
         setClipboardData: () => assert.fail('启动诊断不应依赖剪贴板隐私权限'),
@@ -81,13 +81,14 @@ for (const corrupted of [false, true]) {
     });
 }
 
-test('缺少运行时诊断字段不会阻止启动与首帧', t => {
-    const { root, handlers, dialogs } = fixture(t, { diagnostics: true });
+test('缺少运行时诊断字段不会阻止启动与首帧，观察结束只输出日志', t => {
+    const { root, handlers, dialogs, reports } = fixture(t, { diagnostics: true });
     root.bbqBoot.inspectRuntime({});
     root.bbqBoot.ready();
     root.bbqBoot.print('[BBQ first frame]');
-    t.mock.timers.tick(3000);
-    assert.match(dialogs[0].content, /首帧 已绘制/);
+    t.mock.timers.tick(60000);
+    assert.equal(reports[0].firstFrame, true);
+    assert.equal(dialogs.length, 0);
     assert.deepEqual(handlers, {});
 });
 
@@ -129,7 +130,8 @@ for (const frameFirst of [false, true]) {
 }
 
 test('诊断包显示首帧与实际 WebGL 缓冲尺寸，不修改或重绘画布', t => {
-    const { root, dialogs } = fixture(t, { diagnostics: true, build: 'render-test' });
+    const { root, dialogs, reports } = fixture(t, { diagnostics: true, build: 'render-test' });
+    root.__godotMinigameWXGLXEnabled = false;
     root.godotLoader = {
         onScreenCanvas: Object.freeze({ width: 1206, height: 2622 }),
         gl: { drawingBufferWidth: 1206, drawingBufferHeight: 2622,
@@ -138,12 +140,77 @@ test('诊断包显示首帧与实际 WebGL 缓冲尺寸，不修改或重绘画�
     root.bbqBoot.ready();
     root.bbqBoot.print('[BBQ scene ready] (720, 1565)');
     root.bbqBoot.print('[BBQ first frame]');
-    t.mock.timers.tick(3000);
-    assert.equal(dialogs.length, 1);
-    assert.match(dialogs[0].content, /render-test/);
-    assert.match(dialogs[0].content, /首帧 已绘制/);
-    assert.match(dialogs[0].content, /WebGL2.*画布 1206×2622/);
-    assert.match(dialogs[0].content, /缓冲 1206×2622.*丢失 false.*GL 0/);
+    t.mock.timers.tick(60000);
+    assert.equal(dialogs.length, 0);
+    assert.equal(reports[0].build, 'render-test');
+    assert.equal(reports[0].firstFrame, true);
+    assert.match(reports[0].rendering, /WebGL2.*画布 1206×2622/);
+    assert.match(reports[0].rendering, /缓冲 1206×2622.*丢失 false.*GL 0/);
+});
+
+test('首帧后的微信异常、Promise 拒绝与 Godot 错误持续汇总 60 秒，不弹窗且不延长观察窗口', t => {
+    const logged = [];
+    t.mock.method(console, 'error', (...args) => logged.push(args));
+    const { root, handlers, dialogs, reports } = fixture(t, { diagnostics: true });
+    root.bbqBoot.print('[BBQ first frame]');
+    root.bbqBoot.ready();
+    t.mock.timers.tick(30000);
+    for (let i = 0; i < 100; i++) handlers.error({ message: 'WAPixi vertex_attrib' });
+    handlers.rejection({ reason: new Error('late rejection') });
+    root.bbqBoot.printError('Godot draw failure');
+    root.bbqBoot.print('[BBQ first frame]');
+    root.bbqBoot.ready();
+    assert.equal(dialogs.length, 0);
+    assert.equal(reports.length, 0);
+    t.mock.timers.tick(29999);
+    assert.equal(reports.length, 0);
+    t.mock.timers.tick(1);
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0].errorCount, 102);
+    assert.equal(reports[0].errorStats[0].count, 100);
+    assert.equal(reports[0].observationMs, 60000);
+    assert.equal(logged.length, 3);
+    assert.deepEqual(handlers, {});
+    assert.equal(dialogs.length, 0);
+});
+
+test('诊断区分迟到 render 调用和实际绘制，记录多实例及上下文事件并移除监听', t => {
+    const { root, reports } = fixture(t, { diagnostics: true }, {}, {
+        platform: 'android', model: 'OPPO Find N3 Flip', system: 'Android 16',
+    });
+    const listeners = {};
+    const canvas = { width: 1080, height: 2520,
+        addEventListener: (event, fn) => { listeners[event] = fn; },
+        removeEventListener: event => { delete listeners[event]; },
+    };
+    const loader = { config: {}, onScreenCanvas: canvas, currentText: 'loading' };
+    root.godotLoader = loader;
+    root.__godotMinigameWXGLXEnabled = true;
+    root.bbqBoot.loaderEvent(loader, 'created');
+    root.bbqBoot.loaderEvent(loader, 'draw');
+    loader.disposed = true;
+    root.bbqBoot.loaderEvent(loader, 'cleanup');
+    root.bbqBoot.ready();
+    root.bbqBoot.print('[BBQ first frame]');
+    root.bbqBoot.loaderEvent(loader, 'render');
+    root.bbqBoot.loaderEvent(loader, 'draw'); // Simulate an actual lifecycle violation.
+    root.bbqBoot.loaderEvent({ config: { skipRendering: true } }, 'created');
+    listeners.webglcontextlost({ type: 'webglcontextlost' });
+    t.mock.timers.tick(60000);
+    const report = reports[0];
+    assert.equal(report.loaderInstances, 2);
+    assert.equal(report.loaders[0].draws, 2);
+    assert.equal(report.loaders[0].drawsAfterCleanup, 1);
+    assert.equal(report.loaders[0].drawsAfterFirstFrame, 1);
+    assert.equal(report.loaders[0].renderCallsAfterCleanup, 1);
+    assert.equal(typeof report.loaders[0].cleanupElapsedMs, 'number');
+    assert.equal(typeof report.firstFrameElapsedMs, 'number');
+    assert.equal(report.loaders[1].draws, 0);
+    assert.equal(report.renderPath, 'WXGLX');
+    assert.equal(report.device.model, 'OPPO Find N3 Flip');
+    assert.match(report.mode, /不适用/);
+    assert.equal(report.contextEvents[0].type, 'webglcontextlost');
+    assert.deepEqual(listeners, {});
 });
 
 const entry = readFileSync(new URL('../platform/wechat/engine-entry.js', `file://${__filename}`), 'utf8')

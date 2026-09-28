@@ -43,9 +43,35 @@ def patch_wechat_loader(source):
     # Image/subpackage callbacks and queued animation frames can outlive cleanup.
     # They must not draw with deleted GL resources or resize Godot's live canvas.
     replacements = {
-        '        render() {': '        render() {\n            if (this.disposed) return;',
+        '    class GodotLoader {': '''    function reportLoaderEvent(loader, event) {
+        const boot = gameGlobal.bbqBoot;
+        if (boot) boot.loaderEvent(loader, event);
+    }
+
+    class GodotLoader {''',
+        'this.offScreenCanvas = document.createElement("canvas");':
+            'this.offScreenCanvas = config.skipRendering ? null : document.createElement("canvas");',
+        'this.currentText = config.textConfig.firstStartText;':
+            'this.currentText = config.textConfig.firstStartText;\n            reportLoaderEvent(this, "created");',
+        '            this.initWebGL();': '            if (!config.skipRendering) this.initWebGL();',
+        '            this.loadImages();': '            if (!config.skipRendering) this.loadImages();',
+        '            this.offScreenCanvas.width = width * this.dpr;\n            this.offScreenCanvas.height = height * this.dpr;':
+            '''            if (this.offScreenCanvas) {
+                this.offScreenCanvas.width = width * this.dpr;
+                this.offScreenCanvas.height = height * this.dpr;
+            }''',
+        '        render() {': '''        render() {
+            reportLoaderEvent(this, "render");
+            if (this.disposed || this.config.skipRendering) return;''',
+        '        renderToWebGL() {': '''        renderToWebGL() {
+            if (this.disposed || this.config.skipRendering) return;''',
+        '            this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);':
+            '            this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);\n            reportLoaderEvent(this, "draw");',
         '        resizeCanvases() {': '        resizeCanvases() {\n            if (this.disposed) return;',
-        '        cleanup() {': '        cleanup() {\n            if (this.disposed) return;\n            this.disposed = true;',
+        '        cleanup() {': '''        cleanup() {
+            if (this.disposed) return;
+            this.disposed = true;
+            reportLoaderEvent(this, "cleanup");''',
     }
     for before, after in replacements.items():
         if source.count(before) != 1:
@@ -63,8 +89,11 @@ def main():
     parser.add_argument('--preset', default='WeChat Resources')
     parser.add_argument('--output', type=Path, default=ROOT / 'build/wechat')
     parser.add_argument('--zip', action='store_true', help='额外生成 ZIP 压缩包；仅在明确需要时使用')
-    parser.add_argument('--diagnostics', action='store_true', help='启动后显示真机渲染诊断；仅用于排查预览包')
+    parser.add_argument('--diagnostics', action='store_true', help='采集首帧后 60 秒渲染诊断并输出日志；仅用于排查预览包')
+    parser.add_argument('--android-render-probe', choices=('A', 'B', 'C'),
+                        help='安卓渲染对照（自动开启诊断）：A 原路径，B 跳过 Loading 绘制，C 标准 WebGL2；iOS 保持原路径')
     args = parser.parse_args()
+    args.diagnostics = args.diagnostics or args.android_render_probe is not None
     if len(args.appid) != 18 or not args.appid.startswith('wx'):
         parser.error('AppID 必须为 wx 开头的 18 位字符串。')
     engine_version = subprocess.check_output([args.godot, '--version'], text=True).strip()
@@ -112,6 +141,7 @@ def main():
         })
         shutil.copy2(ROOT / 'platform/wechat/game.js', stage / 'game.js')
         shutil.copy2(ROOT / 'platform/wechat/boot-diagnostics.js', stage / 'boot-diagnostics.js')
+        shutil.copy2(ROOT / 'platform/wechat/render-probe.js', stage / 'render-probe.js')
         shutil.copy2(ROOT / 'platform/wechat/haptics.js', stage / 'haptics.js')
         shutil.copy2(ROOT / 'platform/wechat/game-club.js', stage / 'game-club.js')
         shutil.copy2(ROOT / 'platform/wechat/THIRD_PARTY_NOTICES.txt', stage / 'THIRD_PARTY_NOTICES.txt')
@@ -127,6 +157,7 @@ def main():
         pack = pack.rename(stage / 'engine/bbq.bin')
         (stage / 'boot-options.js').write_text('module.exports = ' + json.dumps({
             'diagnostics': args.diagnostics, 'build': build_id,
+            'androidRenderProbe': args.android_render_probe,
             'pack': {'bytes': pack.stat().st_size, 'crc32': f'{zlib.crc32(pack.read_bytes()):08x}'},
         }) + ';\n')
         sizes = {str(p.relative_to(stage)): p.stat().st_size for p in sorted(stage.rglob('*')) if p.is_file() and not p.name.startswith('.')}
@@ -134,8 +165,10 @@ def main():
         write_json(stage / 'export-info.json', {
             'appid': args.appid, 'godot': engine_version,
             'template': URL, 'template_sha256': SHA256,
-            'runtime_patches': ['sdk-preserve-device-pixel-ratio', 'loader-stop-after-cleanup'],
+            'runtime_patches': ['sdk-preserve-device-pixel-ratio', 'loader-stop-after-cleanup',
+                                'loader-render-probe'],
             'diagnostics': args.diagnostics, 'build': build_id,
+            'android_render_probe': args.android_render_probe,
             'total_bytes': total, 'files': sizes,
         })
         # Only replace our generated directory; never clean an arbitrary output.

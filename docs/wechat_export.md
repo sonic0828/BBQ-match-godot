@@ -1,5 +1,23 @@
 # 微信小游戏导出
 
+## 安卓 Loading 闪屏对照（2026-09-28）
+
+OPPO Find N3 Flip（用户报告 Android 16 / ColorOS 16.05、微信 8.0.74、基础库 3.16.3）在构建 `20260926-223440` 进入首页后闪回 Loading 文案，vConsole 开关不影响复现。日志在场景／首帧成功后出现 `WAPixi.js` 的 `vertex_attrib` 属性不匹配。iPhone 16 Pro 同构建正常；两端均使用 EmscriptenGLX。根因仍待真机对照，不能仅凭堆栈认定资源漏导出或已修复。
+
+三组都覆盖标准目录 `build/wechat/`，自动开启诊断；每次导出前关闭该工程，导出后重新打开，再生成该组的预览。不要另建微信工程目录，不生成 ZIP。
+
+| 命令 | 安卓／开发者工具行为 | 用途 |
+| --- | --- | --- |
+| `python3 tools/export_wechat.py --android-render-probe A` | 保留 Loading 和模板自动渲染选择 | 基线；须确认实际日志为 WXGLX，设备不支持时仍会回退 WebGL2 |
+| `python3 tools/export_wechat.py --android-render-probe B` | 跳过 Loading 辅助 Canvas、图片和 GL 初始化／绘制，保留分包加载、DPR 和主画布尺寸 | 判断自定义 Loading 是否为触发条件；进入首页前短暂空白是预期行为 |
+| `python3 tools/export_wechat.py --android-render-probe C` | 保留 Loading，在首次创建上下文前强制标准 WebGL2 | 判断问题是否依赖 WXGLX |
+
+iOS 不应用这三个安卓选项，保持原 Loading 与模板渲染路径，并在报告中标记 `effective=null`。普通导出不加参数，保持原平台策略，不自动为全部安卓关闭 WXGLX。三个对照应使用同一源码／模板／游戏资源，核对报告中的资源字节数与 CRC32；`export-info.json` 和 `boot-options.js` 标记构建号及对照组。
+
+诊断包首帧后持续采集 60 秒，结束仅输出 `[BBQ startup report]` JSON，不弹窗、不创建额外诊断画布。启动失败／30 秒未确认首帧仍保留原有一次错误提示。报告记录机型、系统、实际渲染路径、首帧时间、加载器实例数、清理及最后绘制时间、旧文案、清理／首帧后的实际绘制次数和上下文事件。`renderCallsAfterCleanup` 仅代表被拦截的迟到调用，不能当作发生实际绘制；看 `drawsAfterCleanup` 和 `drawsAfterFirstFrame`。`[BBQ loader cleanup]` 提供提前可读的交接记录。B 组没有加载器 GL 引用，不为诊断额外请求上下文，报告可缺少缓冲和 GL 错误读数。
+
+同一手机每组完整重启小游戏，首页停留至少 60 秒后导出日志，再验证关卡、前后台和旧文案是否复现。只有 B 稳定则优先研究 Loading 交接；只有 C 稳定则评估安卓 WebGL2 兼容策略与性能；两组都失败则继续做最小场景／模板对照。模拟器或单元测试通过不代表该 OPPO 真机闪屏已解决。
+
 ## 轻震反馈（2026-09-26）
 
 小游戏带 `wechat` 特征，不能用原生 `ios`／`android` 特征来决定是否震动；固定模板的 Web `navigator` 也没有震动适配。现由 `game_haptics.gd` 通过 `JavaScriptBridge.get_interface("bbqHaptics")` 调用入口安装的 `platform/wechat/haptics.js`，使用 `wx.vibrateShort({type: 'light'})`。导出脚本同时复制该桥接文件。
@@ -171,7 +189,7 @@ build/wechat/
 python3 tools/export_wechat.py --diagnostics
 ```
 
-诊断包即使收到首帧，也会在 3 秒后显示一次状态，包含构建编号、微信版本、运行模式、WXGLX/WebGL2、画布和绘图缓冲尺寸、上下文丢失状态及 GL 错误。关闭弹窗后可继续检查游戏。下次正常导出不带 `--diagnostics`，即可取消成功时的诊断弹窗；不要将诊断包用于正式发布。
+诊断包收到首帧后继续观察 60 秒，再输出完整状态日志，包含构建编号、微信版本、运行模式、WXGLX/WebGL2、可取得的画布与绘图缓冲尺寸、上下文事件及错误汇总；成功启动不再弹窗。下次正常导出不带 `--diagnostics` 或 `--android-render-probe`，即可关闭延长诊断；不要将诊断包用于正式发布。
 
 相关验证命令：
 

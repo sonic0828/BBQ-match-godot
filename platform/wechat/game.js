@@ -4,7 +4,9 @@ import './glx-config'
 import './godot-loader'
 
 const installBootDiagnostics = require('./boot-diagnostics');
-GameGlobal.bbqBoot = installBootDiagnostics(wx, GameGlobal, require('./boot-options'));
+const bootOptions = require('./boot-options');
+GameGlobal.bbqRenderProbe = require('./render-probe')(wx, GameGlobal, bootOptions);
+GameGlobal.bbqBoot = installBootDiagnostics(wx, GameGlobal, bootOptions);
 GameGlobal.bbqHaptics = require('./haptics')(wx);
 GameGlobal.bbqGameClub = require('./game-club')(wx);
 
@@ -17,6 +19,7 @@ wx.onHide(() => document.dispatchEvent({ type: 'blur' }));
 wx.onShow(() => document.dispatchEvent({ type: 'focus' }));
 
 GameGlobal.godotLoader = new GodotLoader(canvas, {
+    skipRendering: GameGlobal.bbqRenderProbe.skipLoaderRendering,
     textConfig: {
         firstStartText: '炭火已备好，正在准备食材',
         downloadingText: ['正在准备食材', '正在点燃炭火', '马上开烤'],
