@@ -11,17 +11,22 @@ function fixture(t, options = {}, flags = { isIOSHighPerformanceMode: true }, de
     const reports = [];
     const storage = {};
     const checkpoints = [];
+    const nativeLoading = [];
     t.mock.method(console, 'log', (label, data) => {
         if (label === '[BBQ startup report]') reports.push(JSON.parse(data));
     });
     const wx = {
         getDeviceInfo: () => device,
+        getLaunchOptionsSync: () => ({ scene: 1011, query: { privateToken: 'must-not-log' } }),
+        getEnterOptionsSync: () => ({ scene: 1089, query: { privateToken: 'must-not-log' } }),
         getStorageSync: key => storage[key],
         setStorageSync: (key, value) => { storage[key] = value; checkpoints.push(value); },
         onMemoryWarning: callback => { handlers.memory = callback; },
         offMemoryWarning: () => { delete handlers.memory; },
         getAppBaseInfo: () => ({ version: '8.0.78', SDKVersion: '3.17.3' }),
         showModal: options => dialogs.push(options),
+        showLoading: options => nativeLoading.push(options.title),
+        hideLoading: () => nativeLoading.push('hide'),
         setClipboardData: () => assert.fail('启动诊断不应依赖剪贴板隐私权限'),
         onError: callback => { handlers.error = callback; },
         offError: callback => { assert.equal(handlers.error, callback); delete handlers.error; },
@@ -30,7 +35,7 @@ function fixture(t, options = {}, flags = { isIOSHighPerformanceMode: true }, de
     };
     const root = { ...flags };
     root.bbqBoot = installBootDiagnostics(wx, root, options);
-    return { root, handlers, dialogs, reports, storage, checkpoints };
+    return { root, wx, handlers, dialogs, reports, storage, checkpoints, nativeLoading };
 }
 
 test('慢启动仅记录错误汇总，不弹技术诊断窗', t => {
@@ -259,7 +264,7 @@ for (const kind of ['throw', 'init-reject', 'pack-reject', 'start-reject', 'exit
         root.godotLoader = {
             config: { textConfig: { compilingText: 'compiling', initText: 'creating' } },
             setStage() {},
-            cleanup() { cleaned = true; },
+            handoff(text) { assert.equal(text, 'creating'); cleaned = true; },
         };
         const canvas = {};
         const sdk = {};
@@ -303,3 +308,137 @@ for (const kind of ['throw', 'init-reject', 'pack-reject', 'start-reject', 'exit
         }
     });
 }
+
+test('120 秒结束后仍保留前后台检查点，恢复后重开 30 秒观察且等待实际帧信号', t => {
+    const f = fixture(t, { diagnostics: true, build: 'reentry' });
+    f.root.bbqBoot.mark('engine-entry');
+    f.root.bbqBoot.ready();
+    f.root.bbqBoot.print('[BBQ first frame]');
+    t.mock.timers.tick(120000);
+    assert.deepEqual(f.handlers, {});
+    const originalId = f.checkpoints.at(-1).instanceId;
+    f.root.bbqBoot.visibility(false);
+    assert.equal(f.checkpoints.at(-1).lastEvent, 'hide');
+    f.root.bbqBoot.print('[BBQ resume frame]');
+    f.root.bbqBoot.visibility(true);
+    assert.equal(typeof f.handlers.error, 'function');
+    assert.equal(f.checkpoints.at(-1).resumeFrameElapsedMs, null);
+    assert.equal(f.checkpoints.at(-1).entry.scene, 1089);
+    assert.equal(f.checkpoints.at(-1).launch.scene, 1011);
+    t.mock.timers.tick(250);
+    f.root.bbqBoot.print('[BBQ resume frame] home');
+    f.handlers.error({ message: 'restore draw error' });
+    f.root.bbqBoot.print('[BBQ frame sample] {"fps":30}');
+    f.root.bbqBoot.visibility(true); // A duplicate onShow must not reset the timer.
+    t.mock.timers.tick(29749);
+    assert.equal(f.reports.length, 1);
+    t.mock.timers.tick(1);
+    const report = f.reports[1];
+    assert.equal(report.instanceId, originalId);
+    assert.equal(report.observationKind, 'resume');
+    assert.equal(report.observationMs, 30000);
+    assert.equal(report.resumeCount, 1);
+    assert.equal(report.resumeFrameElapsedMs, 250);
+    assert.equal(report.engineEntries, 1);
+    assert.equal(report.errorCount, 1);
+    assert.equal(report.frameSamples.at(-1).fps, 30);
+    assert.equal(f.dialogs.length, 0);
+    assert.deepEqual(f.handlers, {});
+    assert.doesNotMatch(JSON.stringify(f.checkpoints), /privateToken|must-not-log/);
+});
+
+test('多次恢复记录有界，不重建加载器；没有首帧的恢复不会假报成功', t => {
+    const f = fixture(t, { diagnostics: true });
+    f.root.bbqBoot.ready();
+    f.root.bbqBoot.print('[BBQ first frame]');
+    t.mock.timers.tick(120000);
+    for (let i = 0; i < 40; i++) {
+        f.root.bbqBoot.visibility(false);
+        f.root.bbqBoot.visibility(true);
+        t.mock.timers.tick(30000);
+    }
+    const last = f.reports.at(-1);
+    assert.equal(last.resumeCount, 40);
+    assert.equal(last.resumeFrameElapsedMs, null);
+    assert.equal(last.lifecycle.length, 32);
+    assert.ok(last.marks.length <= 64);
+    assert.equal(last.loaderInstances, 0);
+    assert.deepEqual(f.handlers, {});
+});
+
+test('恢复观察重新监听原画布，观察结束解除监听；不调用 getContext', t => {
+    const f = fixture(t, { diagnostics: true });
+    const listeners = {};
+    const loader = { config: {}, onScreenCanvas: {
+        getContext: () => assert.fail('诊断不能创建图形上下文'),
+        addEventListener: (name, fn) => { listeners[name] = fn; },
+        removeEventListener: name => { delete listeners[name]; },
+    } };
+    f.root.godotLoader = loader;
+    f.root.bbqBoot.loaderEvent(loader, 'created');
+    f.root.bbqBoot.ready();
+    f.root.bbqBoot.print('[BBQ first frame]');
+    t.mock.timers.tick(120000);
+    assert.deepEqual(listeners, {});
+    f.root.bbqBoot.visibility(false);
+    f.root.bbqBoot.visibility(true);
+    listeners.webglcontextlost({ type: 'webglcontextlost' });
+    f.handlers.memory({ level: 15 });
+    t.mock.timers.tick(30000);
+    assert.equal(f.reports.at(-1).contextEvents.at(-1).type, 'webglcontextlost');
+    assert.equal(f.reports.at(-1).memoryWarnings.at(-1).level, 15);
+    assert.deepEqual(listeners, {});
+});
+
+test('新实例读取上次检查点并递增启动计数；热恢复保持同一实例', t => {
+    const f = fixture(t, { diagnostics: true, build: 'same-build' });
+    const firstId = f.checkpoints[0].instanceId;
+    f.root.bbqBoot.ready();
+    f.root.bbqBoot.print('[BBQ first frame]');
+    t.mock.timers.tick(120000);
+    t.mock.timers.tick(1);
+    const second = installBootDiagnostics(f.wx, {}, { diagnostics: true, build: 'same-build' });
+    assert.equal(f.checkpoints.at(-1).startNumber, 2);
+    assert.notEqual(f.checkpoints.at(-1).instanceId, firstId);
+    second.visibility(false);
+    second.visibility(true);
+    assert.equal(f.checkpoints.at(-1).startNumber, 2);
+});
+
+test('下载诊断采集原始百分比和字节数，重复高频回调不会扩张记录', t => {
+    const f = fixture(t, { diagnostics: true });
+    for (let i = 0; i < 2000; i++) f.root.bbqBoot.downloadProgress({ progress: 1,
+        totalBytesWritten: 100, totalBytesExpectedToWrite: 200 });
+    f.root.bbqBoot.downloadProgress({ progress: 100, totalBytesWritten: 200, totalBytesExpectedToWrite: 200 });
+    t.mock.timers.tick(30000);
+    assert.equal(f.reports[0].downloads.length, 2);
+    assert.equal(f.reports[0].downloads[0].written, 100);
+    assert.equal(f.reports[0].downloads[0].progress, 1);
+});
+
+for (const platform of ['ios', 'android']) {
+    test(`${platform} 原生等待提示仅用于安卓启动，首帧后恢复不再展示`, t => {
+        const f = fixture(t, { androidNativeLoading: true }, {}, { platform });
+        assert.equal(f.nativeLoading.length, platform === 'android' ? 1 : 0);
+        f.root.bbqBoot.visibility(false);
+        f.root.bbqBoot.visibility(true);
+        f.root.bbqBoot.ready();
+        f.root.bbqBoot.print('[BBQ first frame]');
+        if (platform === 'android') assert.deepEqual(f.nativeLoading,
+            ['正在准备开摊', 'hide', '正在准备开摊', 'hide']);
+        const count = f.nativeLoading.length;
+        f.root.bbqBoot.visibility(false);
+        f.root.bbqBoot.visibility(true);
+        assert.equal(f.nativeLoading.length, count);
+    });
+}
+
+test('启动失败关闭安卓等待提示，重复恢复不重启诊断或遮挡错误提示', t => {
+    const f = fixture(t, { androidNativeLoading: true, diagnostics: true }, {}, { platform: 'android' });
+    f.handlers.error({ message: 'cannot start' });
+    f.root.bbqBoot.visibility(false);
+    f.root.bbqBoot.visibility(true);
+    assert.deepEqual(f.nativeLoading, ['正在准备开摊', 'hide']);
+    assert.deepEqual(f.handlers, {});
+    assert.equal(f.dialogs.length, 1);
+});

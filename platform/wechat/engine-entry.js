@@ -30,8 +30,7 @@ Promise.resolve()
         ]).then(() => {
             boot.inspectRuntime(engine);
             boot.stage('资源就绪，正在创建游戏画面');
-            loader.setStage(loader.config.textConfig.initText);
-            loader.cleanup();
+            loader.handoff(loader.config.textConfig.initText);
             boot.mark('engine-start:start');
             const args = ['--main-pack', '/engine/bbq.bin'];
             if (boot.diagnostics) args.push('--', '--startup-diagnostics');

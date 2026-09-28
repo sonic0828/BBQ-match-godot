@@ -20,8 +20,8 @@ wx.onHide(() => {
     GameGlobal.bbqBoot.visibility(false);
     document.dispatchEvent({ type: 'blur' });
 });
-wx.onShow(() => {
-    GameGlobal.bbqBoot.visibility(true);
+wx.onShow(options => {
+    GameGlobal.bbqBoot.visibility(true, options);
     document.dispatchEvent({ type: 'focus' });
 });
 

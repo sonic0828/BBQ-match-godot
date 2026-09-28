@@ -47,6 +47,9 @@ var startup_sample_frames = 0
 var startup_sample_slow_frames = 0
 var startup_sample_max_delta = 0.0
 var startup_sample_count = 0
+var startup_sample_limit = 12
+var startup_resume_pending = false
+var startup_foreground = true
 
 func _ready() -> void:
 	startup_sampling = OS.has_feature("wechat") and "--startup-diagnostics" in OS.get_cmdline_user_args()
@@ -100,6 +103,12 @@ func _report_wechat_startup() -> void:
 	await RenderingServer.frame_post_draw
 	print("[BBQ first frame]")
 
+func _report_wechat_resume() -> void:
+	await RenderingServer.frame_post_draw
+	startup_resume_pending = false
+	if startup_foreground:
+		print("[BBQ resume frame] ", current_page)
+
 func _layout() -> void:
 	if stage == null:
 		return
@@ -148,7 +157,7 @@ func _layout_game() -> void:
 	board.size = Vector2(720, (bottom_ui.position.y - 24 - top) / board.scale.y)
 
 func _process(delta: float) -> void:
-	if startup_sampling:
+	if startup_sampling and startup_foreground:
 		var now_usec = Time.get_ticks_usec()
 		if startup_sample_last_usec > 0:
 			var elapsed = float(now_usec - startup_sample_last_usec) / 1000000.0
@@ -168,7 +177,7 @@ func _process(delta: float) -> void:
 			startup_sample_slow_frames = 0
 			startup_sample_max_delta = 0.0
 			startup_sample_count += 1
-			startup_sampling = startup_sample_count < 12
+			startup_sampling = startup_sample_count < startup_sample_limit
 	ui_clock += delta
 	if is_instance_valid(center_toast) and ui_clock >= center_toast_until:
 		center_toast.queue_free()
@@ -202,6 +211,7 @@ func _capture() -> void:
 
 func _notification(what: int) -> void:
 	if what in [NOTIFICATION_APPLICATION_FOCUS_OUT, NOTIFICATION_APPLICATION_PAUSED]:
+		startup_foreground = false
 		startup_sample_last_usec = 0
 		if audio != null:
 			audio.set_backgrounded(true)
@@ -210,7 +220,20 @@ func _notification(what: int) -> void:
 		if current_page == "game" and model != null and model.active():
 			_pause()
 	elif what in [NOTIFICATION_APPLICATION_FOCUS_IN, NOTIFICATION_APPLICATION_RESUMED]:
+		var resuming = not startup_foreground
+		startup_foreground = true
 		startup_sample_last_usec = 0
+		if resuming and is_node_ready() and OS.has_feature("wechat") and "--startup-diagnostics" in OS.get_cmdline_user_args():
+			startup_sampling = true
+			startup_sample_count = 0
+			startup_sample_limit = 3
+			startup_sample_seconds = 0.0
+			startup_sample_frames = 0
+			startup_sample_slow_frames = 0
+			startup_sample_max_delta = 0.0
+			if not startup_resume_pending:
+				startup_resume_pending = true
+				_report_wechat_resume.call_deferred()
 		if audio != null:
 			audio.set_backgrounded(false)
 		if haptics != null:

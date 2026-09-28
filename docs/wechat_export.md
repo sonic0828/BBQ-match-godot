@@ -4,19 +4,22 @@
 
 当前优化分支提供轻量 Loading、真实下载进度、辅助资源释放、启动阶段计时和同引擎最小场景。30 秒慢启动不再弹技术诊断窗口，仍继续等待首帧。诊断包首帧后观察 120 秒。具体导出参数、限制和手机验收步骤见 [iPhone 启动优化](ios_startup_optimization.md)。当前两台 iPhone 的 15～20 秒目标和微信整体退出问题仍待新包真机验证。
 
+第二轮增加再次进入诊断：120 秒结束后保留前后台检查点，再次恢复后追加 30 秒观察；通过实例 ID 区分热恢复与新启动。未知进度阶段不再显示固定短条，最后阶段在交接前实际绘制。`--android-native-loading` 可显示微信原生等待提示；`--android-render-probe D` 保持跳过自绘 Loading，同时选择标准 WebGL2，用于与 B 单变量比较。完整测试包当前使用 `--ios-startup-profile loader --android-native-loading`，默认安卓仍是 B。
+
 ## 安卓 Loading 闪屏对照（2026-09-28）
 
 OPPO Find N3 Flip（用户报告 Android 16 / ColorOS 16.05、微信 8.0.74、基础库 3.16.3）在构建 `20260926-223440` 进入首页后闪回 Loading 文案，vConsole 开关不影响复现。日志在场景／首帧成功后出现 `WAPixi.js` 的 `vertex_attrib` 属性不匹配。iPhone 16 Pro 同构建正常；两端均使用 EmscriptenGLX。根因仍待真机对照，不能仅凭堆栈认定资源漏导出或已修复。
 
-三组都覆盖标准目录 `build/wechat/`，自动开启诊断；每次导出前关闭该工程，导出后重新打开，再生成该组的预览。不要另建微信工程目录，不生成 ZIP。
+四组都覆盖标准目录 `build/wechat/`，自动开启诊断；每次导出前关闭该工程，导出后重新打开，再生成该组的预览。不要另建微信工程目录，不生成 ZIP。
 
 | 命令 | 安卓／开发者工具行为 | 用途 |
 | --- | --- | --- |
 | `python3 tools/export_wechat.py --android-render-probe A` | 保留 Loading 和模板自动渲染选择 | 基线；须确认实际日志为 WXGLX，设备不支持时仍会回退 WebGL2 |
 | `python3 tools/export_wechat.py --android-render-probe B` | 跳过 Loading 辅助 Canvas、图片和 GL 初始化／绘制，保留分包加载、DPR 和主画布尺寸 | 判断自定义 Loading 是否为触发条件；进入首页前短暂空白是预期行为 |
 | `python3 tools/export_wechat.py --android-render-probe C` | 保留 Loading，在首次创建上下文前强制标准 WebGL2 | 判断问题是否依赖 WXGLX |
+| `python3 tools/export_wechat.py --android-render-probe D` | 跳过 Loading，同时在首次创建上下文前选择标准 WebGL2 | 与 B 比较渲染路径，排除恢复自绘 Loading 的干扰 |
 
-iOS 不应用这三个安卓选项，并在报告中标记 `effective=null`；iOS 实验由独立的 `--ios-startup-profile` 控制。用户随后确认 OPPO 的 B 包预览正常，当前普通导出对安卓／开发者工具默认保留 B，但不强制关闭 WXGLX。三个安卓对照应使用同一源码／模板／游戏资源，核对构建清单中的资源字节数与 CRC32；`export-info.json` 和 `boot-options.js` 标记构建号及对照组。
+iOS 不应用这四个安卓选项，并在报告中标记 `effective=null`；iOS 实验由独立的 `--ios-startup-profile` 控制。用户随后确认 OPPO 的 B 包预览正常，当前普通导出对安卓／开发者工具默认保留 B，但不强制关闭 WXGLX。四个安卓对照应使用同一源码／模板／游戏资源，核对构建清单中的资源字节数与 CRC32；`export-info.json` 和 `boot-options.js` 标记构建号及对照组。
 
 诊断包首帧后持续采集 120 秒，结束仅输出 `[BBQ startup report]` JSON，不弹窗、不创建额外诊断画布。30 秒未确认首帧只记录慢启动，真正启动失败才显示简短重试提示。报告记录机型、系统、实际渲染路径、首帧时间、加载器实例数、清理及最后绘制时间、旧文案、清理／首帧后的实际绘制次数和上下文事件。`renderCallsAfterCleanup` 仅代表被拦截的迟到调用，不能当作发生实际绘制；看 `drawsAfterCleanup` 和 `drawsAfterFirstFrame`。`[BBQ loader cleanup]` 提供提前可读的交接记录。B 组没有加载器 GL 引用，不为诊断额外请求上下文，报告可缺少缓冲和 GL 错误读数。
 

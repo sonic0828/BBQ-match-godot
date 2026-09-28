@@ -145,11 +145,10 @@ def patch_wechat_loader(source):
             const top = Math.max(0, Number(safe.top) || 0) * this.dpr;
             const bottom = Math.min(height, (Number(safe.bottom) || height / this.dpr) * this.dpr);
             const barY = top + (bottom - top) * 0.78;''',
-        '            if (this.progress > 0) {': '            if (this.progress === null || this.progress > 0) {',
-        '(barConfig.width * this.dpr - 2 * barConfig.padding * this.dpr) * this.progress':
-            '(barConfig.width * this.dpr - 2 * barConfig.padding * this.dpr) * (this.progress === null ? 0.22 : this.progress)',
-        '                    barX + barConfig.padding * this.dpr,':
-            '                    this.progress === null ? (width - progressWidth) / 2 : barX + barConfig.padding * this.dpr,',
+        '            ctx.fillStyle = barConfig.backgroundColor;':
+            '            if (this.progress !== null) {\n            ctx.fillStyle = barConfig.backgroundColor;',
+        '            const textConfig = this.config.textConfig;':
+            '            }\n            const textConfig = this.config.textConfig;',
         '            ctx.fillText(this.currentText, width / 2, barY + (barConfig.height * this.dpr) / 2);': '''            const caption = this.currentText + (this.progress === null ? " …" : ` · 下载 ${Math.round(this.progress * 100)}%`);
             ctx.fillText(caption, width / 2, barY - 20 * this.dpr);''',
         'value > 1 ? value / 100 : value': 'value',
@@ -177,13 +176,20 @@ def patch_wechat_loader(source):
 
             if (task && typeof task.onProgressUpdate''',
         '''                    this.updateProgress(progress, this.config.textConfig.downloadingText[0]);''': '''                    if (!this.downloadComplete) {
-                        this.updateProgress(progress / 100, this.config.textConfig.downloadingText[0]);
-                        if (progress >= 100) {
+                        if (gameGlobal.bbqBoot) gameGlobal.bbqBoot.downloadProgress(event);
+                        const written = Number(event.totalBytesWritten);
+                        const expected = Number(event.totalBytesExpectedToWrite);
+                        const fraction = Number.isFinite(written) && written >= 0 && Number.isFinite(expected) && expected > 0
+                            ? written / expected : progress / 100;
+                        this.updateProgress(fraction, this.config.textConfig.downloadingText[0]);
+                        if (fraction >= 1) {
                             this.downloadComplete = true;
                             if (gameGlobal.bbqBoot) gameGlobal.bbqBoot.mark("subpackage:downloaded");
                             this.setStage(this.config.textConfig.compilingText);
                         }
                     }''',
+        '                task.onProgressUpdate(({ progress }) => {':
+            '                task.onProgressUpdate(event => {\n                    const { progress } = event;',
         '''            windowObject.removeEventListener("resize", this.resizeHandler);
 
             if (!this.gl)''': '''            windowObject.removeEventListener("resize", this.resizeHandler);
@@ -216,7 +222,15 @@ def patch_wechat_loader(source):
     source = source.replace('this.render();', 'this.requestRender();')
     source = source.replace('            this.requestRender();\n            this.loadGameEngine();',
                             '            this.render();\n            this.loadGameEngine();')
-    source = source.replace('        render() {', '''        setStage(text) {
+    source = source.replace('        render() {', '''        handoff(text) {
+            if (this.disposed) return;
+            this.setStage(text);
+            // Commit the final loading message before releasing this GL owner.
+            // cleanup cancels the queued duplicate and all late callbacks.
+            try { this.render(); } finally { this.cleanup(); }
+        }
+
+        setStage(text) {
             if (this.disposed) return;
             this.preparing = true;
             this.progress = null;
@@ -254,8 +268,10 @@ def main():
     parser.add_argument('--ios-startup-profile', choices=('baseline', 'loader', 'wasm', 'combined'),
                         default='baseline', help='iOS 单变量启动对照；普通导出保持 baseline')
     parser.add_argument('--startup-minimal', action='store_true', help='导出同引擎最小场景，仅用于测量启动下限')
-    parser.add_argument('--android-render-probe', choices=('A', 'B', 'C'),
-                        help='安卓渲染对照（自动开启诊断）：A 原路径，B 跳过 Loading 绘制，C 标准 WebGL2；iOS 保持原路径')
+    parser.add_argument('--android-render-probe', choices=('A', 'B', 'C', 'D'),
+                        help='安卓渲染对照：A 原路径，B 跳过 Loading，C 原 Loading＋WebGL2，D 跳过 Loading＋WebGL2；自动开启诊断')
+    parser.add_argument('--android-native-loading', action='store_true',
+                        help='安卓使用微信原生等待提示，不接触主 GL 画布；首帧自动关闭')
     args = parser.parse_args()
     args.diagnostics = (args.diagnostics or args.android_render_probe is not None
                         or args.ios_startup_profile != 'baseline' or args.startup_minimal)
@@ -326,6 +342,7 @@ def main():
         (stage / 'boot-options.js').write_text('module.exports = ' + json.dumps({
             'diagnostics': args.diagnostics, 'build': build_id,
             'androidRenderProbe': args.android_render_probe,
+            'androidNativeLoading': args.android_native_loading,
             'iosStartupProfile': args.ios_startup_profile, 'minimal': args.startup_minimal,
             'pack': {'bytes': pack.stat().st_size, 'crc32': f'{zlib.crc32(pack.read_bytes()):08x}'},
         }) + ';\n')
@@ -339,6 +356,7 @@ def main():
                                 'sdk-file-read-errors', 'engine-startup-probes'],
             'diagnostics': args.diagnostics, 'build': build_id,
             'android_render_probe': args.android_render_probe,
+            'android_native_loading': args.android_native_loading,
             'ios_startup_profile': args.ios_startup_profile, 'startup_minimal': args.startup_minimal,
             'total_bytes': total, 'files': sizes,
         })

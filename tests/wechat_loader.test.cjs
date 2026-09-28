@@ -20,6 +20,8 @@ function fixture(source, { probe = 'A', platform = 'android', supportGLX = true,
     const images = [];
     const captions = [];
     const marks = [];
+    const downloads = [];
+    const rectangles = [];
     const tasks = new Map();
     let sequence = 0;
     let progressCallback, packageSuccess, packageFail;
@@ -45,7 +47,7 @@ function fixture(source, { probe = 'A', platform = 'android', supportGLX = true,
         return () => {};
     } });
     const globals = {
-        GameGlobal: { bbqBoot: { mark: name => marks.push(name), fail: error => marks.push(error), loaderEvent: (loader, event) => events.push({ loader, event }) } }, console,
+        GameGlobal: { bbqBoot: { downloadProgress: event => downloads.push(event), mark: name => marks.push(name), fail: error => marks.push(error), loaderEvent: (loader, event) => events.push({ loader, event }) } }, console,
         window: { addEventListener() {}, removeEventListener() {},
             requestAnimationFrame: schedule, cancelAnimationFrame: cancel },
         wx: { getWindowInfo: () => ({ windowWidth: 390, windowHeight: 844, pixelRatio: 3, safeArea: { top: 47, bottom: 810 } }),
@@ -70,11 +72,13 @@ function fixture(source, { probe = 'A', platform = 'android', supportGLX = true,
         iconConfig: { visible: false, style: { height: 30, bottom: 20 } },
         materialConfig: { backgroundImage: 'background.jpg' },
     });
+    const roundedRect = loader.drawRoundedRect;
+    loader.drawRoundedRect = (...args) => { rectangles.push(args); return roundedRect.apply(loader, args); };
     if (initialProgress !== null) loader.updateProgress(initialProgress, 'init');
     flush();
     return { loader, screen, frames, images, contexts, events, policy, auxiliaryCanvases, subpackages,
-        root: globals.GameGlobal, captions, marks, tasks, flush,
-        progress: value => progressCallback({ progress: value }), packageSuccess: () => packageSuccess(),
+        root: globals.GameGlobal, captions, marks, downloads, rectangles, tasks, flush,
+        progress: (value, bytes = {}) => progressCallback({ progress: value, ...bytes }), packageSuccess: () => packageSuccess(),
         packageFail: error => packageFail(error), clears: () => clears, draws: () => draws, deletions: () => deletions };
 }
 
@@ -134,7 +138,7 @@ for (const platform of ['android', 'devtools']) {
     });
 }
 
-for (const probe of [undefined, 'A', 'B', 'C']) {
+for (const probe of [undefined, 'A', 'B', 'C', 'D']) {
     test(`iOS 保持原 Loading 和 WXGLX 路径，不应用安卓对照 ${probe}`, () => {
         const f = fixture(patched, { probe, platform: 'ios' });
         assert.equal(f.policy.effective, null);
@@ -157,6 +161,50 @@ test('A 组设备未声明支持 WXGLX 时沿用模板 WebGL2 回退', () => {
     const f = fixture(patched, { probe: 'A', supportGLX: false });
     assert.deepEqual(f.contexts, ['webgl2']);
     assert.equal(f.root.__godotMinigameWXGLXEnabled, false);
+});
+
+test('B 与 D 仅改变引擎渲染选择，均不创建 Loader GL 或辅助画布', () => {
+    for (const probe of ['B', 'D']) {
+        const f = fixture(patched, { probe });
+        assert.equal(f.auxiliaryCanvases, 0);
+        assert.deepEqual(f.contexts, []);
+        assert.equal(f.draws(), 0);
+        assert.equal(f.policy.skipLoaderRendering, true);
+        assert.equal(f.root.__GODOT_DISABLE_WXGLX === true, probe === 'D');
+    }
+});
+
+test('等待与准备阶段不画进度槽，下载时才绘制，字节进度优先且不倒退', () => {
+    const f = fixture(patched, { platform: 'ios', iosProfile: 'loader', initialProgress: null });
+    f.loader.render();
+    assert.equal(f.rectangles.length, 0);
+    f.progress(1, { totalBytesWritten: 500, totalBytesExpectedToWrite: 1000 });
+    f.flush();
+    assert.equal(f.loader.progress, 0.5);
+    assert.match(f.captions.at(-1)[0], /下载 50%/);
+    assert.equal(f.downloads[0].progress, 1);
+    assert.equal(f.rectangles.length, 2);
+    f.progress(0, { totalBytesWritten: 400, totalBytesExpectedToWrite: 1000 });
+    assert.equal(f.loader.progress, 0.5);
+    f.progress(1, { totalBytesWritten: 1000, totalBytesExpectedToWrite: 1000 });
+    f.rectangles.length = 0;
+    f.flush();
+    assert.equal(f.loader.progress, null);
+    assert.equal(f.rectangles.length, 0);
+    assert.equal(f.captions.at(-1)[0], 'compiling …');
+});
+
+test('交接前最后阶段实际绘制，随后取消排队任务并阻止再次接管画布', () => {
+    const f = fixture(patched, { platform: 'ios', iosProfile: 'loader' });
+    const before = f.draws();
+    f.loader.handoff('creating home');
+    assert.equal(f.captions.at(-1)[0], 'creating home …');
+    assert.equal(f.draws(), before + 1);
+    assert.equal(f.tasks.size, 0);
+    assert.equal(f.loader.disposed, true);
+    f.loader.handoff('late');
+    f.frames.forEach(fn => fn());
+    assert.equal(f.draws(), before + 1);
 });
 
 test('普通安卓导出保留 B 兼容策略，iOS 普通导出不跳过 Loading', () => {
