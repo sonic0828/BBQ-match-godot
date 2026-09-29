@@ -4,7 +4,7 @@
 
 用户确认完整 D 包 `20260929-103330` 两次进入 UI 正常。新日志实际为标准 WebGL2，未出现 `vertex_attrib`，7 次同实例恢复均有首帧（14～76 ms）；有一条分包阶段宿主 timeout，之后成功启动，不能说整个日志零错误。普通导出据此固定为安卓 D，iOS 保持轻量 Loading；详细诊断需显式 `--diagnostics`。仍需更多安卓机型验证性能与兼容性。
 
-继续使用 `codex/ios-startup-optimization`。iPhone 12 Mini 整个微信退出暂不做专项优化。合并前新增的存档修复和冷启动验收见 [微信存档](save_persistence.md)；本次暖恢复日志不能替代存档冷启动验证。以下 B／D 构建记录保留历史对照。
+优化在 `codex/ios-startup-optimization` 完成，用户已确认 iPhone 16 Pro 和 Android（OPPO）存档冷启动验收通过，并授权合入本地 main，详见 [微信存档](save_persistence.md)。iPhone 12 Mini 整个微信退出暂不做专项优化。以下 B／D 构建记录保留历史对照。
 
 ## 已确认的证据
 
@@ -37,4 +37,4 @@ B `20260929-103149` 与 D `20260929-103330` 的 PCK 均为 5,433,028 字节，SH
 
 用户已确认 D 恢复完整 UI，并已设为普通导出默认。若后续设备仍复现，可在诊断包仅加 `--no-android-native-loading` 做单项对照，或分别用 B／D 加 `--startup-minimal` 检查缺失图元；不要同时改材质、DPR、资源加载和引擎版本。最小场景测试完成后恢复完整游戏包。
 
-本机检查详见 `docs/verification.md` 同日记录。OPPO 用户复测已通过 UI 显示；冷启动存档以及其他机型仍按上述范围独立验收。
+本机检查详见 `docs/verification.md` 同日记录。OPPO 用户复测已通过 UI 显示与存档冷启动；其他安卓机型兼容性和新版正式包的入口回归仍待验证。
