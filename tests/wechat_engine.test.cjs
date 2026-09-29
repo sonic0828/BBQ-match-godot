@@ -3,6 +3,7 @@ const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 const vm = require('node:vm');
 const { test } = require('node:test');
+const configureRenderProbe = require('../platform/wechat/render-probe');
 
 const source = execFileSync('python3', ['-B', '-c', `
 import hashlib, zipfile
@@ -78,3 +79,28 @@ for (const fail of ['wasm', 'read', 'fs-error', 'fs-reject']) {
         await assert.rejects(f.engine.init('/engine/godot'), /rejected|failed|FS error/);
     });
 }
+
+test('固定引擎首次创建上下文时 D 真正选择 WebGL2，B 与 iOS 保持 WXGLX', () => {
+    const helpers = source.slice(source.indexOf('function wxGLXGetNativeExport('), source.indexOf('function wxGLXCallNative('));
+    const createContext = source.slice(source.indexOf('function wxGLXPatchCreateContext('), source.indexOf('function wxGLXPatchMakeContextCurrent('));
+    for (const [platform, probe, expected] of [['android', 'B', 'wxwebgl2'], ['android', 'D', 'webgl2'], ['ios', 'D', 'wxwebgl2']]) {
+        const types = [];
+        const root = {};
+        const wx = { getDeviceInfo: () => ({ platform }), env: { isSupportEmscriptenGLX: true } };
+        configureRenderProbe(wx, root, { androidRenderProbe: probe });
+        const canvas = { getContext: type => { types.push(type); return { emscriptenGLX: type === 'wxwebgl2' }; } };
+        const originalGetContext = canvas.getContext;
+        const context = vm.createContext({ GameGlobal: root, wx, canvas,
+            Module: { _glxInit() {}, _glxInitBufferDataAndGlState() {}, _glxUpdateContextId() {} },
+            GL: { createContext: (target, attributes) => target.getContext('webgl2', attributes) },
+        });
+        vm.runInContext(helpers + createContext + `
+            function wxGLXInitContext(gl) { wxGLXValidateAndPinContext(gl); }
+            wxGLXPatchCreateContext();
+            GL.createContext(canvas, { majorVersion: 2 });
+        `, context);
+        assert.deepEqual(types, [expected]);
+        assert.equal(root.__godotMinigameWXGLXEnabled, expected === 'wxwebgl2');
+        assert.equal(canvas.getContext, originalGetContext);
+    }
+});

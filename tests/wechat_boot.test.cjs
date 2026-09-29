@@ -4,7 +4,7 @@ const { test } = require('node:test');
 const vm = require('node:vm');
 const installBootDiagnostics = require('../platform/wechat/boot-diagnostics.js');
 
-function fixture(t, options = {}, flags = { isIOSHighPerformanceMode: true }, device = { platform: 'ios' }) {
+function fixture(t, options = {}, flags = { isIOSHighPerformanceMode: true }, device = { platform: 'ios' }, api = {}) {
     t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
     const handlers = {};
     const dialogs = [];
@@ -32,6 +32,7 @@ function fixture(t, options = {}, flags = { isIOSHighPerformanceMode: true }, de
         offError: callback => { assert.equal(handlers.error, callback); delete handlers.error; },
         onUnhandledRejection: callback => { handlers.rejection = callback; },
         offUnhandledRejection: callback => { assert.equal(handlers.rejection, callback); delete handlers.rejection; },
+        ...api,
     };
     const root = { ...flags };
     root.bbqBoot = installBootDiagnostics(wx, root, options);
@@ -441,4 +442,62 @@ test('启动失败关闭安卓等待提示，重复恢复不重启诊断或遮�
     assert.deepEqual(f.nativeLoading, ['正在准备开摊', 'hide']);
     assert.deepEqual(f.handlers, {});
     assert.equal(f.dialogs.length, 1);
+});
+
+test('应用错误为零不宣称宿主无错误，Godot 前后台回执在观察结束后仍有界保留', t => {
+    const f = fixture(t, { diagnostics: true });
+    f.root.bbqBoot.ready();
+    f.root.bbqBoot.print('[BBQ first frame]');
+    t.mock.timers.tick(120000);
+    assert.match(f.reports[0].errorScope, /host-only errors may be absent/);
+    assert.equal(f.reports[0].errorCount, 0);
+    for (let i = 0; i < 40; i++) {
+        f.root.bbqBoot.print('[BBQ godot lifecycle] {"foreground":false,"notification":1005}');
+    }
+    assert.equal(f.checkpoints.at(-1).godotLifecycle.length, 12);
+    assert.equal(f.checkpoints.at(-1).godotLifecycle[0].notification, 1005);
+    f.root.bbqBoot.visibility(false);
+    f.root.bbqBoot.visibility(true);
+    f.root.bbqBoot.print('[BBQ godot lifecycle] {"foreground":true,"notification":1004}');
+    t.mock.timers.tick(17);
+    f.root.bbqBoot.print('[BBQ resume frame] home');
+    t.mock.timers.tick(30000);
+    assert.equal(f.reports.at(-1).godotLifecycle.at(-1).foreground, true);
+    assert.equal(f.reports.at(-1).resumeFrameElapsedMs, 17);
+});
+
+test('安卓等待提示的不可用和失败都有明确记录，不阻止首页首帧', t => {
+    const f = fixture(t, { diagnostics: true, androidNativeLoading: true }, {}, { platform: 'android' }, {
+        showLoading: undefined,
+    });
+    f.root.bbqBoot.visibility(false);
+    f.root.bbqBoot.visibility(true);
+    f.wx.showLoading = options => options.fail({ errMsg: 'not supported' });
+    f.root.bbqBoot.visibility(true);
+    f.root.bbqBoot.ready();
+    f.root.bbqBoot.print('[BBQ first frame]');
+    t.mock.timers.tick(120000);
+    const events = f.reports.at(-1).nativeLoadingEvents;
+    assert.deepEqual(events.map(item => item.event), ['unavailable', 'show:requested', 'show:failed']);
+    assert.equal(events.at(-1).detail, 'not supported');
+    assert.equal(f.reports.at(-1).firstFrame, true);
+    assert.equal(f.dialogs.length, 0);
+});
+
+test('原生提示 API 接受回执与请求区分，旧失败回调不清掉新提示的所有权', t => {
+    const requests = [];
+    const f = fixture(t, { diagnostics: true, androidNativeLoading: true }, {}, { platform: 'android' }, {
+        showLoading: options => { requests.push(options); options.success(); },
+        hideLoading: options => options.success(),
+    });
+    f.root.bbqBoot.visibility(false);
+    f.root.bbqBoot.visibility(true);
+    requests[0].fail({ errMsg: 'late failure' });
+    f.root.bbqBoot.ready();
+    f.root.bbqBoot.print('[BBQ first frame]');
+    t.mock.timers.tick(120000);
+    const events = f.reports[0].nativeLoadingEvents.map(item => item.event);
+    assert.equal(events.filter(item => item === 'show:accepted').length, 2);
+    assert.equal(events.filter(item => item === 'hide:accepted').length, 2);
+    assert.ok(events.includes('show:failed'));
 });

@@ -1,10 +1,14 @@
 # 微信小游戏导出
 
+## 安卓再次进入兼容验证（2026-09-29）
+
+当前优先解决 OPPO 再次进入后程序绘制 UI 缺失，交付完整 D 包 `20260929-103330`：`--ios-startup-profile loader --android-native-loading --android-render-probe D`。补齐 Godot 窗口焦点通知及去重，记录 Godot 生命周期回执和原生等待提示状态；错误汇总明确不覆盖全部宿主错误。D 在引擎第一次创建上下文前选择标准 WebGL2，iOS 路径不受安卓选项影响。普通无参数导出仍为 B，待手机比较后决定正式策略。[当前对照与验收步骤](android_reentry.md)。
+
 ## iPhone 启动与稳定性（2026-09-28）
 
 当前优化分支提供轻量 Loading、真实下载进度、辅助资源释放、启动阶段计时和同引擎最小场景。30 秒慢启动不再弹技术诊断窗口，仍继续等待首帧。诊断包首帧后观察 120 秒。具体导出参数、限制和手机验收步骤见 [iPhone 启动优化](ios_startup_optimization.md)。当前两台 iPhone 的 15～20 秒目标和微信整体退出问题仍待新包真机验证。
 
-第二轮增加再次进入诊断：120 秒结束后保留前后台检查点，再次恢复后追加 30 秒观察；通过实例 ID 区分热恢复与新启动。未知进度阶段不再显示固定短条，最后阶段在交接前实际绘制。`--android-native-loading` 可显示微信原生等待提示；`--android-render-probe D` 保持跳过自绘 Loading，同时选择标准 WebGL2，用于与 B 单变量比较。完整测试包当前使用 `--ios-startup-profile loader --android-native-loading`，默认安卓仍是 B。
+第二轮增加再次进入诊断：120 秒结束后保留前后台检查点，再次恢复后追加 30 秒观察；通过实例 ID 区分热恢复与新启动。未知进度阶段不再显示固定短条，最后阶段在交接前实际绘制。`--android-native-loading` 可显示微信原生等待提示；`--android-render-probe D` 保持跳过自绘 Loading，同时选择标准 WebGL2，用于与 B 单变量比较。第二轮测试包使用 `--ios-startup-profile loader --android-native-loading`，安卓为 B；当前包以上方 9 月 29 日记录为准。
 
 ## 安卓 Loading 闪屏对照（2026-09-28）
 

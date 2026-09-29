@@ -15,7 +15,7 @@ GameGlobal.bbqGameClub = require('./game-club')(wx);
 GameGlobal.__godotMinigameNativeAudioMinDurationSeconds = Number.MAX_SAFE_INTEGER;
 
 // The adapter routes window/canvas listeners through document. Forward host
-// lifecycle events so the existing Godot focus-out handler pauses the game.
+// lifecycle events to Godot's WINDOW focus notifications (not APPLICATION).
 wx.onHide(() => {
     GameGlobal.bbqBoot.visibility(false);
     document.dispatchEvent({ type: 'blur' });

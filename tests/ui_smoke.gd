@@ -51,6 +51,32 @@ func run() -> void:
 	app._notification(NOTIFICATION_APPLICATION_FOCUS_IN)
 	check(app.model.state == BoardModel.GameState.PAUSED, "foreground never auto-resumes timer")
 	app._resume()
+	# Web forwards WINDOW focus, not APPLICATION focus. Exercise both without
+	# requiring a phone, including duplicate notifications from native platforms.
+	app.startup_diagnostics = true
+	app.startup_sampling = true
+	app.startup_sample_last_usec = Time.get_ticks_usec() - 1900000
+	app._notification(Node.NOTIFICATION_WM_WINDOW_FOCUS_OUT)
+	var paused_modal = app.modal
+	check(not app.startup_foreground and app.startup_sample_last_usec == 0, "window blur clears frame timing")
+	check(app.model.state == BoardModel.GameState.PAUSED and app.audio.backgrounded and app.haptics.backgrounded, "window blur pauses game, audio and haptics")
+	app._notification(NOTIFICATION_APPLICATION_FOCUS_OUT)
+	check(app.modal == paused_modal, "duplicate blur does not replace pause panel")
+	await create_timer(0.1).timeout
+	app._notification(Node.NOTIFICATION_WM_WINDOW_FOCUS_IN)
+	check(app.startup_foreground and app.startup_sample_last_usec == 0 and app.startup_sample_seconds == 0.0, "window focus discards background duration")
+	check(not app.audio.backgrounded and not app.haptics.backgrounded and app.model.state == BoardModel.GameState.PAUSED, "window focus restores host state but awaits player resume")
+	await process_frame
+	await RenderingServer.frame_post_draw
+	await process_frame
+	check(not app.startup_resume_pending, "resume confirmation waits for an actual rendered frame")
+	app.startup_sample_count = 1
+	app._notification(NOTIFICATION_APPLICATION_FOCUS_IN)
+	check(app.startup_sample_count == 1 and not app.startup_resume_pending, "duplicate focus neither resets sampling nor queues another frame")
+	check(app.startup_sample_max_delta < 0.5, "background gap is excluded from measured frame stalls")
+	app.startup_diagnostics = false
+	app.startup_sampling = false
+	app._resume()
 	app.model.remaining = 0.001
 	await create_timer(0.1).timeout
 	check(app.model.state == BoardModel.GameState.FAIL and app.modal != null, "timeout shows result modal")

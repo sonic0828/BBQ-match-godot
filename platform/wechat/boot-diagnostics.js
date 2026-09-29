@@ -30,6 +30,8 @@ module.exports = function installBootDiagnostics(wxApi, root, options = {}) {
     const frameSamples = [];
     const memoryWarnings = [];
     const lifecycle = [];
+    const godotLifecycle = [];
+    const nativeLoadingEvents = [];
     const downloads = [];
     let foreground = true;
     let status = 'starting';
@@ -40,6 +42,8 @@ module.exports = function installBootDiagnostics(wxApi, root, options = {}) {
     let entry = launch;
     const device = wxApi.getDeviceInfo();
     let nativeWaiting = false;
+    let waitingRequest = 0;
+    let waitingUnavailable = false;
     const app = wxApi.getAppBaseInfo();
     const environment = `${device.platform} / 微信 ${app.version} / 基础库 ${app.SDKVersion}`;
     const mode = () => device.platform !== 'ios' ? `${device.platform}（iOS 高性能标志不适用）`
@@ -80,20 +84,45 @@ module.exports = function installBootDiagnostics(wxApi, root, options = {}) {
             ? engine.rtenv.HEAPU8.buffer.byteLength : null;
     }
 
+    function waitingEvent(event, detail) {
+        if (!options.diagnostics) return;
+        const item = { event, elapsedMs: Date.now() - startedAt };
+        if (detail !== undefined) item.detail = String(detail).slice(0, 250);
+        nativeLoadingEvents.push(item);
+        if (nativeLoadingEvents.length > 12) nativeLoadingEvents.shift();
+        console.log('[BBQ native loading]', JSON.stringify(item));
+    }
+
     function showWaiting() {
         if (!options.androidNativeLoading || device.platform !== 'android' || nativeWaiting
-            || firstFrame || fatal || !wxApi.showLoading || !wxApi.hideLoading) return;
+            || firstFrame || fatal) return;
+        if (!wxApi.showLoading || !wxApi.hideLoading) {
+            if (!waitingUnavailable) waitingEvent('unavailable');
+            waitingUnavailable = true;
+            return;
+        }
         nativeWaiting = true;
+        const request = ++waitingRequest;
+        const failed = error => {
+            if (request === waitingRequest) nativeWaiting = false;
+            waitingEvent('show:failed', error && error.errMsg || error);
+        };
+        waitingEvent('show:requested');
         try {
             wxApi.showLoading({ title: '正在准备开摊', mask: false,
-                fail: () => { nativeWaiting = false; } });
-        } catch (_) { nativeWaiting = false; }
+                success: () => waitingEvent('show:accepted'), fail: failed });
+        } catch (error) { failed(error); }
     }
 
     function hideWaiting() {
         if (!nativeWaiting) return;
         nativeWaiting = false;
-        try { wxApi.hideLoading({}); } catch (_) { /* Optional host UI. */ }
+        waitingRequest++;
+        waitingEvent('hide:requested');
+        const failed = error => waitingEvent('hide:failed', error && error.errMsg || error);
+        try {
+            wxApi.hideLoading({ success: () => waitingEvent('hide:accepted'), fail: failed });
+        } catch (error) { failed(error); }
     }
 
     function checkpoint(lastEvent) {
@@ -106,6 +135,7 @@ module.exports = function installBootDiagnostics(wxApi, root, options = {}) {
                 status, phase, lastEvent, foreground, firstFrame, firstFrameElapsedMs,
                 wasmMemoryBytes: heapBytes(), errorCount, resumeCount, resumeFrameElapsedMs, engineEntries,
                 lifecycle: lifecycle.slice(),
+                godotLifecycle: godotLifecycle.slice(),
                 // This is the last observed state, never a diagnosis of a crash.
                 lastError: errors.length ? errors[errors.length - 1].line.slice(0, 500) : null,
             });
@@ -227,10 +257,11 @@ module.exports = function installBootDiagnostics(wxApi, root, options = {}) {
             highPerformancePlus: root.isIOSHighPerformanceModePlus ?? null,
             elapsedMs: Date.now() - startedAt, engineStarted, scene, firstFrame,
             firstFrameElapsedMs, observationMs, observationKind,
-            resumeCount, resumeFrameElapsedMs, lifecycle, downloads,
+            resumeCount, resumeFrameElapsedMs, lifecycle, godotLifecycle, downloads, nativeLoadingEvents,
             marks, frameSamples, memoryWarnings, status, foreground,
             loaderInstances, engineEntries, loaders, contextEvents,
             rendering, runtime, errorCount, firstErrors: errors,
+            errorScope: 'wx callbacks and Godot stderr; host-only errors may be absent',
             errorStats: Array.from(errorStats.values()), detail,
         };
         const fullReport = JSON.stringify(diagnostic, null, 2);
@@ -379,6 +410,14 @@ module.exports = function installBootDiagnostics(wxApi, root, options = {}) {
             if (line.startsWith('[BBQ scene ready]')) {
                 scene = line.slice('[BBQ scene ready]'.length).trim();
                 mark('scene:ready');
+            }
+            if (options.diagnostics && line.startsWith('[BBQ godot lifecycle] ')) {
+                try {
+                    godotLifecycle.push({ elapsedMs: Date.now() - startedAt,
+                        ...JSON.parse(line.slice('[BBQ godot lifecycle] '.length)) });
+                    if (godotLifecycle.length > 12) godotLifecycle.shift();
+                    checkpoint('godot-lifecycle');
+                } catch (error) { console.warn('[BBQ lifecycle parse]', String(error)); }
             }
             if (options.diagnostics && !finished && line.startsWith('[BBQ frame sample] ')) {
                 try {

@@ -40,6 +40,7 @@ var bag_dialog: BagDialog
 var center_toast: Panel
 var center_toast_until = 0.0
 var daily_check = 0.0
+var startup_diagnostics = false
 var startup_sampling = false
 var startup_sample_last_usec = 0
 var startup_sample_seconds = 0.0
@@ -52,7 +53,8 @@ var startup_resume_pending = false
 var startup_foreground = true
 
 func _ready() -> void:
-	startup_sampling = OS.has_feature("wechat") and "--startup-diagnostics" in OS.get_cmdline_user_args()
+	startup_diagnostics = OS.has_feature("wechat") and "--startup-diagnostics" in OS.get_cmdline_user_args()
+	startup_sampling = startup_diagnostics
 	font = load("res://assets/fonts/game.ttf")
 	var theme_resource = Theme.new()
 	theme_resource.default_font = font
@@ -210,20 +212,29 @@ func _capture() -> void:
 	get_tree().quit()
 
 func _notification(what: int) -> void:
-	if what in [NOTIFICATION_APPLICATION_FOCUS_OUT, NOTIFICATION_APPLICATION_PAUSED]:
+	# The Web template forwards canvas focus as WINDOW notifications.
+	# Native platforms may send both kinds; apply each transition only once.
+	if what in [NOTIFICATION_WM_WINDOW_FOCUS_OUT, NOTIFICATION_APPLICATION_FOCUS_OUT, NOTIFICATION_APPLICATION_PAUSED]:
+		if not startup_foreground:
+			return
 		startup_foreground = false
 		startup_sample_last_usec = 0
+		if startup_diagnostics:
+			print("[BBQ godot lifecycle] ", JSON.stringify({"foreground": false, "notification": what}))
 		if audio != null:
 			audio.set_backgrounded(true)
 		if haptics != null:
 			haptics.set_backgrounded(true)
 		if current_page == "game" and model != null and model.active():
 			_pause()
-	elif what in [NOTIFICATION_APPLICATION_FOCUS_IN, NOTIFICATION_APPLICATION_RESUMED]:
-		var resuming = not startup_foreground
+	elif what in [NOTIFICATION_WM_WINDOW_FOCUS_IN, NOTIFICATION_APPLICATION_FOCUS_IN, NOTIFICATION_APPLICATION_RESUMED]:
+		if startup_foreground:
+			return
 		startup_foreground = true
 		startup_sample_last_usec = 0
-		if resuming and is_node_ready() and OS.has_feature("wechat") and "--startup-diagnostics" in OS.get_cmdline_user_args():
+		if startup_diagnostics:
+			print("[BBQ godot lifecycle] ", JSON.stringify({"foreground": true, "notification": what}))
+		if is_node_ready() and startup_diagnostics:
 			startup_sampling = true
 			startup_sample_count = 0
 			startup_sample_limit = 3
