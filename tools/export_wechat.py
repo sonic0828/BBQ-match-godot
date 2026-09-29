@@ -335,6 +335,7 @@ def main():
         shutil.copy2(ROOT / 'platform/wechat/render-probe.js', stage / 'render-probe.js')
         shutil.copy2(ROOT / 'platform/wechat/haptics.js', stage / 'haptics.js')
         shutil.copy2(ROOT / 'platform/wechat/game-club.js', stage / 'game-club.js')
+        shutil.copy2(ROOT / 'platform/wechat/ads.js', stage / 'ads.js')
         shutil.copy2(ROOT / 'platform/wechat/THIRD_PARTY_NOTICES.txt', stage / 'THIRD_PARTY_NOTICES.txt')
         shutil.copy2(ROOT / 'platform/wechat/engine-entry.js', stage / 'engine/game.js')
         log = output.parent / 'wechat-export.log'

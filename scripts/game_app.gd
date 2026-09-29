@@ -40,6 +40,15 @@ var bag_dialog: BagDialog
 var center_toast: Panel
 var center_toast_until = 0.0
 var daily_check = 0.0
+var ads: GameAds
+var ad_slot: Control
+var tools_row: Control
+var interstitial_due = false
+var ad_busy = false
+var ad_request_id = 0
+var ad_result: Dictionary = {}
+var ad_blocker: Control
+var unsaved_ad_receipt = ""
 var startup_diagnostics = false
 var startup_sampling = false
 var startup_sample_last_usec = 0
@@ -70,6 +79,11 @@ func _ready() -> void:
 	haptics = preload("res://scripts/core/game_haptics.gd").new()
 	add_child(haptics)
 	haptics.enabled = save.vibration_enabled
+	ads = GameAds.new()
+	add_child(ads)
+	ads.event_received.connect(_on_ad_event)
+	ads.layout_changed.connect(_layout)
+	_initialize_ads.call_deferred()
 	var background = TextureRect.new()
 	background.texture = load("res://assets/art/night_market.png")
 	background.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -105,6 +119,12 @@ func _report_wechat_startup() -> void:
 	await RenderingServer.frame_post_draw
 	print("[BBQ first frame]")
 
+func _initialize_ads() -> void:
+	await RenderingServer.frame_post_draw
+	ads.initialize()
+	if current_page == "game" and model.level >= 5: ads.prepare_reward()
+	_sync_banner()
+
 func _report_wechat_resume() -> void:
 	await RenderingServer.frame_post_draw
 	startup_resume_pending = false
@@ -127,6 +147,7 @@ func _layout() -> void:
 	if page != null:
 		page.size = stage.size
 	_layout_game()
+	if is_instance_valid(ad_blocker): ad_blocker.size = stage.size
 	if modal != null:
 		modal.size = stage.size
 		modal.get_child(0).size = stage.size
@@ -140,23 +161,34 @@ func _layout_game() -> void:
 	game_hud.position.y = height * 0.08
 	hint_panel.position.y = game_hud.position.y + 108
 	combo_label.position.y = hint_panel.position.y + 49
-	bottom_ui.position.y = height - 265
+	var window_height = ads.window_height if ads.window_height > 0 else float(get_viewport().get_window().size.y)
+	var window_width = ads.window_width if ads.window_width > 0 else float(get_viewport().get_window().size.x)
+	var units_per_pixel = size.y / maxf(window_height, 1.0) / stage.scale.y
+	var card = ads.banner_size * units_per_pixel
+	card.x = ads.banner_size.x * size.x / maxf(window_width, 1.0) / stage.scale.x
+	var bottom_margin = (ads.safe_bottom + 8) * units_per_pixel
+	tools_row.scale = Vector2.ONE * 0.88
+	tools_row.position.x = (720 - 720 * tools_row.scale.x) * 0.5
+	ad_slot.position = Vector2((720 - card.x) * 0.5, 124 * 0.88 + 18)
+	ad_slot.size = card
+	bottom_ui.size.y = ad_slot.position.y + card.y + bottom_margin
+	bottom_ui.position.y = height - bottom_ui.size.y
+	var rows = 4 if model.grills.size() == 10 else ceili(model.grills.size() / 3.0)
 	var top = height * 0.266
+	if rows == 4 or bottom_ui.position.y - 24 - top < (rows - 1) * 222 + 232:
+		top = hint_panel.position.y + 72
 	var available_height = bottom_ui.position.y - 24 - top
 	board.scale = Vector2.ONE
-	if model.grills.size() >= 10:
-		# Four rows, including the isolated covered grill. Scale only on short screens.
-		top = hint_panel.position.y + 96
-		available_height = bottom_ui.position.y - 24 - top
-		board.row_gap = maxf(212.0, (available_height - 236.0) / 3.0)
-		board.scale = Vector2.ONE * minf(1.0, available_height / (board.row_gap * 3.0 + 236.0))
-	elif model.grills.size() == 6:
+	if rows == 2:
 		board.row_gap = 260.0
-		top += maxf(0, (available_height - 480) * 0.5)
+		top += maxf(0, (available_height - 492) * 0.5)
 	else:
-		board.row_gap = (available_height - 220) * 0.5
+		board.row_gap = maxf(222.0, (available_height - 232.0) / (rows - 1))
+	# Keep trays separated; only shrink grills after consuming spare row spacing.
+	board.scale = Vector2.ONE * minf(1.0, available_height / (board.row_gap * (rows - 1) + 232.0))
 	board.position = Vector2((720 - 720 * board.scale.x) * 0.5, top)
 	board.size = Vector2(720, (bottom_ui.position.y - 24 - top) / board.scale.y)
+	_sync_banner()
 
 func _process(delta: float) -> void:
 	if startup_sampling and startup_foreground:
@@ -181,6 +213,8 @@ func _process(delta: float) -> void:
 			startup_sample_count += 1
 			startup_sampling = startup_sample_count < startup_sample_limit
 	ui_clock += delta
+	if ad_busy and not ad_result.is_empty() and startup_foreground:
+		_finish_ad()
 	if is_instance_valid(center_toast) and ui_clock >= center_toast_until:
 		center_toast.queue_free()
 		center_toast = null
@@ -246,9 +280,10 @@ func _notification(what: int) -> void:
 				startup_resume_pending = true
 				_report_wechat_resume.call_deferred()
 		if audio != null:
-			audio.set_backgrounded(false)
+			audio.set_backgrounded(ad_busy)
 		if haptics != null:
-			haptics.set_backgrounded(false)
+			haptics.set_backgrounded(ad_busy)
+	if is_node_ready(): _sync_banner()
 
 func _input(event: InputEvent) -> void:
 	if (event is InputEventMouseButton or event is InputEventScreenTouch) and event.pressed:
@@ -257,6 +292,7 @@ func _input(event: InputEvent) -> void:
 		board.note_pointer(event.pressed)
 
 func _unhandled_key_input(event: InputEvent) -> void:
+	if ad_busy: return
 	if event.is_action_pressed("ui_cancel"):
 		if current_page == "game":
 			if bag_mode != "":
@@ -269,6 +305,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_show_home()
 
 func _new_page(name_value: String) -> void:
+	interstitial_due = false
+	ad_slot = null
+	tools_row = null
 	bag_mode = ""
 	bag_teaching = false
 	bag_button = null
@@ -292,6 +331,7 @@ func _new_page(name_value: String) -> void:
 	page.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stage.add_child(page)
 	_layout()
+	_sync_banner()
 
 func _show_home() -> void:
 	model.cancel_drag()
@@ -348,6 +388,7 @@ func _show_levels() -> void:
 	_label(page, "完成当前关卡，即可解锁下一摊", Rect2(50, 1080, 620, 42), 24, CREAM)
 
 func _start_level(number: int) -> void:
+	if ad_busy: return
 	var config = LevelLoader.load_level(number)
 	if config.is_empty():
 		return
@@ -395,8 +436,12 @@ func _start_level(number: int) -> void:
 	bottom_ui.size = Vector2(720, 265)
 	bottom_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	page.add_child(bottom_ui)
+	tools_row = Control.new()
+	tools_row.size = Vector2(720, 124)
+	tools_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bottom_ui.add_child(tools_row)
 	for i in range(4):
-		var slot = _texture_button(bottom_ui, preload("res://assets/ui/locked_slot.svg"), Rect2(72 + i * 152, 0, 120, 124))
+		var slot = _texture_button(tools_row, preload("res://assets/ui/locked_slot.svg"), Rect2(72 + i * 152, 0, 120, 124))
 		slot.name = "ReservedFunction%d" % (i + 1)
 		slot.disabled = true
 		slot.focus_mode = Control.FOCUS_NONE
@@ -410,16 +455,15 @@ func _start_level(number: int) -> void:
 			var badge = _panel(slot, Rect2(83, 88, 40, 35), Color("c63225"), 18, CREAM)
 			bag_badge = _label(badge, "", Rect2(0, 0, 40, 35), 24, Color.WHITE)
 			_update_bag_badge()
-	# Empty banner reservation, matching the reference banner's ~6.6:1 ratio.
-	var ad_space = Control.new()
-	ad_space.name = "AdSlot"
-	ad_space.position = Vector2(76, 145)
-	ad_space.size = Vector2(568, 86)
-	ad_space.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bottom_ui.add_child(ad_space)
+	# Native 20:7 card lives above Canvas; reserve its actual logical dimensions.
+	ad_slot = Control.new()
+	ad_slot.name = "AdSlot"
+	ad_slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bottom_ui.add_child(ad_slot)
 	model.start(config)
 	_layout_game()
 	_update_hud(0)
+	if number >= 5: ads.prepare_reward()
 	if number >= 5 and not save.bag_tutorial_done: _show_bag_unlock()
 
 func _hud_number_style(label: Label) -> void:
@@ -508,7 +552,9 @@ func _on_model_event(kind: String, detail: Dictionary) -> void:
 			hint_label.text = "就是这样！开动脑筋，让美味一起出炉"
 			toast_until = model.clock + 2
 		"win":
+			var first_clear = model.level not in save.completed
 			win_reward = save.complete_level(model.level, run_id)
+			interstitial_due = first_clear and win_reward and model.level in [3, 6, 9]
 			pending_win = true
 		"fail":
 			audio.reset_effects()
@@ -576,9 +622,7 @@ func _show_result(won: bool) -> void:
 	var content = _open_modal(title, subtitle, 610 if won else 500)
 	_label(content, ("本局获得 +50 金币" if win_reward else "今夜，你就是夜市大厨。") if won else "好味道，值得再来一串。", Rect2(38, 153, 480, 48), 26, GOLD)
 	if won:
-		_button(content, "下一关" if model.level < 10 else "回到关卡选择", Rect2(62, 241, 432, 79), func():
-			if model.level < 10: _start_level(model.level + 1)
-			else: _show_levels(), true)
+		_button(content, "下一关" if model.level < 10 else "回到关卡选择", Rect2(62, 241, 432, 79), _next_level, true)
 		_button(content, "再玩一次", Rect2(62, 341, 432, 74), func(): _start_level(model.level))
 		_button(content, "返回首页", Rect2(62, 437, 432, 74), _show_home)
 	else:
@@ -586,10 +630,11 @@ func _show_result(won: bool) -> void:
 		_button(content, "返回首页", Rect2(62, 342, 432, 74), _show_home)
 
 func _open_modal(title: String, subtitle: String, height: float) -> Control:
-	_close_modal()
+	_close_modal(false)
 	modal = Control.new()
 	modal.size = stage.size
 	stage.add_child(modal)
+	_sync_banner()
 	var backdrop = ColorRect.new()
 	backdrop.size = modal.size
 	backdrop.color = Color(0.025, 0.04, 0.045, 0.78)
@@ -599,11 +644,12 @@ func _open_modal(title: String, subtitle: String, height: float) -> Control:
 	_label(content, subtitle, Rect2(30, 113, 496, 40), 22, MUTED)
 	return content
 
-func _close_modal() -> void:
+func _close_modal(update_banner: bool = true) -> void:
 	if modal != null:
 		stage.remove_child(modal)
 		modal.queue_free()
 		modal = null
+	if update_banner: _sync_banner()
 
 func _time_text(value: float) -> String:
 	var seconds = ceili(value)
@@ -683,8 +729,8 @@ func _show_bag_unlock() -> void:
 	var content = _open_modal("新道具解锁", "打包袋 · 任意打包一种烤串", 420)
 	BagDialog.art(content, preload("res://assets/art/takeaway-bag.png"), Rect2(190, 165, 176, 180))
 	_label(content, "赠送 1 次！点击下方打包袋试试", Rect2(23, 352, 510, 42), 26, GOLD)
-	var position_y = bottom_ui.position.y
-	var spotlight = _texture_button(modal, preload("res://assets/ui/bag_slot.svg"), Rect2(72, position_y, 120, 124))
+	var spotlight_position = bottom_ui.position + tools_row.position + bag_button.position * tools_row.scale
+	var spotlight = _texture_button(modal, preload("res://assets/ui/bag_slot.svg"), Rect2(spotlight_position, Vector2(120, 124)))
 	spotlight.name = "BagUnlock"
 	BagDialog.art(spotlight, preload("res://assets/art/takeaway-bag.png"), Rect2(18, 9, 84, 94))
 	var lock = BagDialog.art(spotlight, preload("res://assets/ui/locked_slot.svg"), Rect2(0, 0, 120, 124))
@@ -693,15 +739,15 @@ func _show_bag_unlock() -> void:
 	unlock.tween_callback(lock.queue_free)
 	spotlight.pressed.connect(func(): _show_bag_dialog(false))
 	_label(spotlight, "免费", Rect2(8, 95, 104, 33), 24, CREAM)
-	var arrow = _label(modal, "↓", Rect2(84, position_y - 78, 96, 75), 69, GOLD)
+	var position_y = spotlight_position.y
+	var arrow = _label(modal, "↓", Rect2(spotlight_position.x + 6, position_y - 78, 96, 75), 69, GOLD)
 	BagDialog.outline(arrow, 5)
 	var tween = arrow.create_tween().set_loops()
 	tween.tween_property(arrow, "position:y", position_y - 66, 0.35)
 	tween.tween_property(arrow, "position:y", position_y - 78, 0.35)
-	spotlight.pivot_offset = spotlight.size * 0.5
 	var reveal = spotlight.create_tween()
 	spotlight.scale = Vector2.ONE * 0.3
-	reveal.tween_property(spotlight, "scale", Vector2.ONE, 0.4).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	reveal.tween_property(spotlight, "scale", tools_row.scale, 0.4).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 func _open_bag() -> void:
 	if not model.active() or model.pack_until >= 0: return
@@ -730,7 +776,7 @@ func _show_bag_dialog(shop: bool) -> void:
 	tween.tween_property(bag_dialog, "scale", Vector2.ONE, 0.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 func _close_bag() -> void:
-	if bag_teaching: return
+	if bag_teaching or ad_busy: return
 	bag_mode = ""
 	bag_dialog = null
 	_close_modal()
@@ -766,9 +812,86 @@ func _exchange_bag() -> void:
 		_show_center_toast("兑换成功，打包袋 +1")
 
 func _request_bag_ad() -> void:
-	# The rewarded-video slot is intentionally unconfigured until an ad ID arrives.
-	# A future completed-view callback must credit persistent stock, never auto-use.
-	_show_center_toast("广告尚未准备好")
+	if bag_mode != "shop" or ad_busy: return
+	if not unsaved_ad_receipt.is_empty():
+		if _save_ad_reward(unsaved_ad_receipt):
+			_close_bag()
+			_show_center_toast("已获得打包袋 ×1")
+		else: _show_center_toast("奖励保存失败，请再次点击领取")
+		return
+	_begin_ad("rewarded")
+
+func _next_level() -> void:
+	if ad_busy: return
+	if model.level >= 10:
+		_show_levels()
+	elif interstitial_due:
+		interstitial_due = false
+		_begin_ad("interstitial")
+	else:
+		_start_level(model.level + 1)
+
+func _begin_ad(kind: String) -> void:
+	ad_busy = true
+	ad_result = {}
+	audio.reset_effects()
+	audio.set_backgrounded(true)
+	haptics.set_backgrounded(true)
+	ad_blocker = Control.new()
+	ad_blocker.size = stage.size
+	ad_blocker.mouse_filter = Control.MOUSE_FILTER_STOP
+	stage.add_child(ad_blocker)
+	_sync_banner()
+	ad_request_id = ads.request(kind)
+
+func _save_ad_reward(receipt: String) -> bool:
+	unsaved_ad_receipt = receipt
+	if save.grant_ad_bag(receipt) != OK: return false
+	ads.acknowledge(receipt)
+	unsaved_ad_receipt = ""
+	_update_bag_badge()
+	return true
+
+func _on_ad_event(event: Dictionary) -> void:
+	if event.get("type") == "pending_reward":
+		if not _save_ad_reward(str(event.receipt)):
+			_show_center_toast("奖励保存失败，请在打包袋中再次领取")
+		return
+	if event.get("type") != "result" or not ad_busy or event.get("id") != ad_request_id: return
+	ad_result = event.duplicate()
+	if event.kind == "rewarded" and event.status == "completed":
+		ad_result.status = "saved" if _save_ad_reward(str(event.get("receipt", ""))) else "save_failed"
+
+func _finish_ad() -> void:
+	var result = ad_result
+	ad_result = {}
+	ad_busy = false
+	if is_instance_valid(ad_blocker): ad_blocker.queue_free()
+	ad_blocker = null
+	audio.set_backgrounded(not startup_foreground)
+	haptics.set_backgrounded(not startup_foreground)
+	if result.kind == "interstitial":
+		_start_level(model.level + 1)
+	elif result.status == "saved":
+		_close_bag()
+		_show_center_toast("已获得打包袋 ×1")
+	elif result.status == "cancelled":
+		_show_center_toast("完整观看视频后可获得打包袋")
+	elif result.status == "save_failed":
+		_show_center_toast("奖励保存失败，请再次点击领取")
+	else:
+		_show_center_toast("广告尚未准备好")
+	_sync_banner()
+
+func _sync_banner() -> void:
+	if ads == null: return
+	var visible = current_page == "game" and is_instance_valid(ad_slot) and modal == null and not ad_busy and startup_foreground
+	var rect = Rect2()
+	if is_instance_valid(ad_slot) and ads.window_width > 0 and ads.window_height > 0:
+		var ratio = Vector2(ads.window_width, ads.window_height) / size
+		rect = ad_slot.get_global_rect()
+		rect = Rect2(rect.position * ratio, rect.size * ratio)
+	ads.set_banner(rect, visible, run_id)
 
 func _show_center_toast(message: String) -> void:
 	if is_instance_valid(center_toast):

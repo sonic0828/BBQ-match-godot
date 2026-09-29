@@ -31,7 +31,7 @@ func setup(app: Control, shop: bool, teaching: bool) -> void:
 		var buy = decorated_button(app, "300", Rect2(80, 605, 440, 126), false, func(): exchanged.emit())
 		buy.name = "BagBuy"
 		art(buy, preload("res://assets/ui/coin.svg"), Rect2(94, 25, 66, 72))
-		var ad = decorated_button(app, "免费", Rect2(80, 742, 440, 126), true, func(): ad_requested.emit())
+		var ad = decorated_button(app, "看视频 +1", Rect2(80, 742, 440, 126), true, func(): ad_requested.emit())
 		ad.name = "BagAd"
 		art(ad, preload("res://assets/ui/video.svg"), Rect2(81, 22, 85, 77))
 	else:
@@ -74,5 +74,6 @@ func decorated_button(app: Control, text: String, rect: Rect2, orange: bool, act
 	button.button_down.connect(func(): button.modulate = Color(0.85, 0.85, 0.85))
 	button.button_up.connect(func(): button.modulate = Color.WHITE)
 	var label = app._label(button, text, Rect2(150 if text != "使用" else 0, 22, 225 if text != "使用" else 440, 77), 55, Color("fffce5"))
+	if text == "看视频 +1": label.add_theme_font_size_override("font_size", 36)
 	outline(label, 6)
 	return button

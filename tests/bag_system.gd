@@ -200,7 +200,8 @@ func run() -> void:
 	check(app.bag_mode == "shop" and app.bag_dialog.wallet.text == "600", "empty quota opens shop with wallet")
 	var before = app.model.remaining
 	await click(app.bag_dialog.get_node("BagAd"))
-	check(app.center_toast.get_child(0).text == "广告尚未准备好" and app.save.available_bags() == 0, "unconfigured ad gives exact toast without reward")
+	advance(0.01)
+	check(app.center_toast.get_child(0).text == "广告尚未准备好" and app.save.available_bags() == 0, "native preview without WeChat ad API gives exact toast without reward")
 	advance(2.1)
 	check(app.model.remaining == before and app.center_toast == null, "shop pauses timer while toast expires on UI clock")
 	await click(app.bag_dialog.get_node("BagBuy"))

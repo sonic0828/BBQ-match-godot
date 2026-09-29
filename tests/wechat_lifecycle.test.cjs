@@ -44,6 +44,7 @@ test('真实微信入口经固定模板适配器向 Godot 转发窗口失焦和�
         if (name === './boot-diagnostics') return () => ({ mark() {},
             visibility: value => events.push(['host', value]) });
         if (name === './haptics' || name === './game-club') return () => ({});
+        if (name === './ads') return () => ({ visibility: value => events.push(['ads', value]) });
         return {};
     };
     vm.runInContext(readFileSync(path.join(__dirname, '../platform/wechat/game.js'), 'utf8'), context);
@@ -53,6 +54,7 @@ test('真实微信入口经固定模板适配器向 Godot 转发窗口失焦和�
     vm.runInContext(registration + '_godot_js_display_notification_cb(0,1002,1003,1004,1005);', context);
     host.hide();
     host.show({ scene: 1089 });
-    assert.deepEqual(events, [['host', false], ['godot', 1005], ['host', true], ['godot', 1004]]);
+    assert.deepEqual(events, [['ads', false], ['host', false], ['godot', 1005],
+        ['ads', true], ['host', true], ['godot', 1004]]);
     assert.equal(loaders, 1);
 });

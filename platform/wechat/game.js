@@ -10,6 +10,7 @@ require('./godot-loader');
 GameGlobal.bbqBoot.mark('adapter:ready');
 GameGlobal.bbqHaptics = require('./haptics')(wx);
 GameGlobal.bbqGameClub = require('./game-club')(wx);
+GameGlobal.bbqAds = require('./ads')(wx);
 
 // All current effects are short WAVs mixed by Godot, with no external audio CDN.
 GameGlobal.__godotMinigameNativeAudioMinDurationSeconds = Number.MAX_SAFE_INTEGER;
@@ -17,10 +18,12 @@ GameGlobal.__godotMinigameNativeAudioMinDurationSeconds = Number.MAX_SAFE_INTEGE
 // The adapter routes window/canvas listeners through document. Forward host
 // lifecycle events to Godot's WINDOW focus notifications (not APPLICATION).
 wx.onHide(() => {
+    GameGlobal.bbqAds.visibility(false);
     GameGlobal.bbqBoot.visibility(false);
     document.dispatchEvent({ type: 'blur' });
 });
 wx.onShow(options => {
+    GameGlobal.bbqAds.visibility(true);
     GameGlobal.bbqBoot.visibility(true, options);
     document.dispatchEvent({ type: 'focus' });
 });

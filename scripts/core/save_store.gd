@@ -20,6 +20,7 @@ var bag_day = ""
 var bag_daily_used = false
 var run_serial = 0
 var last_reward_run = 0
+var last_ad_receipt = ""
 
 func load_progress(path: String = "") -> void:
 	if path.is_empty():
@@ -63,6 +64,7 @@ func load_progress(path: String = "") -> void:
 	bag_daily_used = bool(config.get_value("economy", "bagDailyUsed", false))
 	run_serial = maxi(0, int(config.get_value("economy", "runSerial", 0)))
 	last_reward_run = maxi(0, int(config.get_value("economy", "lastRewardRun", 0)))
+	last_ad_receipt = str(config.get_value("economy", "lastAdReceipt", ""))
 	if migrating or economy_migration or recovered:
 		var result = save_progress(path)
 		if recovered and result == OK:
@@ -126,6 +128,7 @@ func save_progress(path: String = "") -> Error:
 	config.set_value("economy", "bagDailyUsed", bag_daily_used)
 	config.set_value("economy", "runSerial", run_serial)
 	config.set_value("economy", "lastRewardRun", last_reward_run)
+	config.set_value("economy", "lastAdReceipt", last_ad_receipt)
 	# Replace one complete snapshot: never persist a debit without its item credit.
 	var result = _commit_snapshot(config.encode_to_text().to_utf8_buffer(), path)
 	if result != OK:
@@ -189,6 +192,18 @@ func buy_bag() -> Error:
 	if result != OK:
 		coins += BAG_COST
 		bag_stock -= 1
+	return result
+
+func grant_ad_bag(receipt: String) -> Error:
+	if receipt.is_empty(): return ERR_INVALID_PARAMETER
+	if receipt == last_ad_receipt: return OK
+	var previous = last_ad_receipt
+	bag_stock += 1
+	last_ad_receipt = receipt
+	var result = save_progress()
+	if result != OK:
+		bag_stock -= 1
+		last_ad_receipt = previous
 	return result
 
 func consume_bag(tutorial_use: bool = false) -> bool:
