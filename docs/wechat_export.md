@@ -2,7 +2,9 @@
 
 ## 安卓再次进入兼容验证（2026-09-29）
 
-当前优先解决 OPPO 再次进入后程序绘制 UI 缺失，交付完整 D 包 `20260929-103330`：`--ios-startup-profile loader --android-native-loading --android-render-probe D`。补齐 Godot 窗口焦点通知及去重，记录 Godot 生命周期回执和原生等待提示状态；错误汇总明确不覆盖全部宿主错误。D 在引擎第一次创建上下文前选择标准 WebGL2，iOS 路径不受安卓选项影响。普通无参数导出仍为 B，待手机比较后决定正式策略。[当前对照与验收步骤](android_reentry.md)。
+用户确认 D 包 `20260929-103330` 的 OPPO 首次与再次进入均显示完整 UI。普通无参数导出现固定为 **安卓 D＋原生等待提示、iOS 轻量 Loading、完整游戏、详细诊断关闭**。D 在首次创建上下文前选择标准 WebGL2，iOS 渲染路径不受安卓选项影响。首次使用其他安卓机型仍须验证性能。[安卓证据与验收步骤](android_reentry.md)。
+
+合并前修复关卡、教学及金币重进回退：导出时注入固定微信文件系统补丁，修正磁盘重命名与保存失败反馈，保护遗留存档。[存档机制及冷启动验收](save_persistence.md)。
 
 ## iPhone 启动与稳定性（2026-09-28）
 
@@ -14,7 +16,7 @@
 
 OPPO Find N3 Flip（用户报告 Android 16 / ColorOS 16.05、微信 8.0.74、基础库 3.16.3）在构建 `20260926-223440` 进入首页后闪回 Loading 文案，vConsole 开关不影响复现。日志在场景／首帧成功后出现 `WAPixi.js` 的 `vertex_attrib` 属性不匹配。iPhone 16 Pro 同构建正常；两端均使用 EmscriptenGLX。根因仍待真机对照，不能仅凭堆栈认定资源漏导出或已修复。
 
-四组都覆盖标准目录 `build/wechat/`，自动开启诊断；每次导出前关闭该工程，导出后重新打开，再生成该组的预览。不要另建微信工程目录，不生成 ZIP。
+四组都覆盖标准目录 `build/wechat/`；现在需显式加 `--diagnostics` 开启详细诊断，不再因渲染选项自动开启。每次导出前关闭该工程，导出后重新打开，再生成预览。不要另建微信工程目录，不生成 ZIP。
 
 | 命令 | 安卓／开发者工具行为 | 用途 |
 | --- | --- | --- |
@@ -23,7 +25,7 @@ OPPO Find N3 Flip（用户报告 Android 16 / ColorOS 16.05、微信 8.0.74、�
 | `python3 tools/export_wechat.py --android-render-probe C` | 保留 Loading，在首次创建上下文前强制标准 WebGL2 | 判断问题是否依赖 WXGLX |
 | `python3 tools/export_wechat.py --android-render-probe D` | 跳过 Loading，同时在首次创建上下文前选择标准 WebGL2 | 与 B 比较渲染路径，排除恢复自绘 Loading 的干扰 |
 
-iOS 不应用这四个安卓选项，并在报告中标记 `effective=null`；iOS 实验由独立的 `--ios-startup-profile` 控制。用户随后确认 OPPO 的 B 包预览正常，当前普通导出对安卓／开发者工具默认保留 B，但不强制关闭 WXGLX。四个安卓对照应使用同一源码／模板／游戏资源，核对构建清单中的资源字节数与 CRC32；`export-info.json` 和 `boot-options.js` 标记构建号及对照组。
+iOS 不应用这四个安卓选项，诊断报告标记 `effective=null`；`--ios-startup-profile` 默认 `loader`，WASM 实验未启用。安卓／开发者工具默认 D。对照须使用同一源码／模板／游戏资源，核对清单中的资源字节数、CRC32 和构建号。安卓原生等待提示默认开启，单项对照可用 `--no-android-native-loading`。
 
 诊断包首帧后持续采集 120 秒，结束仅输出 `[BBQ startup report]` JSON，不弹窗、不创建额外诊断画布。30 秒未确认首帧只记录慢启动，真正启动失败才显示简短重试提示。报告记录机型、系统、实际渲染路径、首帧时间、加载器实例数、清理及最后绘制时间、旧文案、清理／首帧后的实际绘制次数和上下文事件。`renderCallsAfterCleanup` 仅代表被拦截的迟到调用，不能当作发生实际绘制；看 `drawsAfterCleanup` 和 `drawsAfterFirstFrame`。`[BBQ loader cleanup]` 提供提前可读的交接记录。B 组没有加载器 GL 引用，不为诊断额外请求上下文，报告可缺少缓冲和 GL 错误读数。
 

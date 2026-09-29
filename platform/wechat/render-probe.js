@@ -1,10 +1,10 @@
-// Apply the experiment before either the loader or Godot creates a GL context.
+// Apply the phone-verified defaults before any GL context is created.
 module.exports = function configureRenderProbe(wx, root, options) {
     const platform = wx.getDeviceInfo().platform;
     const requested = options.androidRenderProbe || null;
     // Keep the phone-verified Android workaround in ordinary exports as well.
-    const effective = platform === 'android' || platform === 'devtools' ? requested || 'B' : null;
-    const iosProfile = platform === 'ios' ? options.iosStartupProfile || 'baseline' : null;
+    const effective = platform === 'android' || platform === 'devtools' ? requested || 'D' : null;
+    const iosProfile = platform === 'ios' ? options.iosStartupProfile || 'loader' : null;
     if (effective === 'C' || effective === 'D') root.__GODOT_DISABLE_WXGLX = true;
     return {
         requested, effective, iosProfile,

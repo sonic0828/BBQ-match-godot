@@ -260,7 +260,7 @@ def patch_wechat_loader(source):
     return source
 
 
-def main():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--appid', default='wxd575463c13869e7d')
     parser.add_argument('--godot', default=shutil.which('godot') or '/Applications/Godot.app/Contents/MacOS/Godot')
@@ -271,20 +271,23 @@ def main():
     parser.add_argument('--zip', action='store_true', help='额外生成 ZIP 压缩包；仅在明确需要时使用')
     parser.add_argument('--diagnostics', action='store_true', help='采集启动阶段与首帧后 120 秒诊断；仅用于排查预览包')
     parser.add_argument('--ios-startup-profile', choices=('baseline', 'loader', 'wasm', 'combined'),
-                        default='baseline', help='iOS 单变量启动对照；普通导出保持 baseline')
+                        default='loader', help='iOS 默认轻量 Loading；其余策略仅用于对照')
     parser.add_argument('--startup-minimal', action='store_true', help='导出同引擎最小场景，仅用于测量启动下限')
     parser.add_argument('--android-render-probe', choices=('A', 'B', 'C', 'D'),
-                        help='安卓渲染对照：A 原路径，B 跳过 Loading，C 原 Loading＋WebGL2，D 跳过 Loading＋WebGL2；自动开启诊断')
-    parser.add_argument('--android-native-loading', action='store_true',
-                        help='安卓使用微信原生等待提示，不接触主 GL 画布；首帧自动关闭')
-    args = parser.parse_args()
-    args.diagnostics = (args.diagnostics or args.android_render_probe is not None
-                        or args.ios_startup_profile != 'baseline' or args.startup_minimal)
+                        default='D', help='安卓默认 D（跳过自绘 Loading＋WebGL2）；A/B/C 仅用于对照')
+    parser.add_argument('--android-native-loading', action=argparse.BooleanOptionalAction, default=True,
+                        help='安卓默认使用微信原生等待提示；可加 --no-android-native-loading 关闭')
+    args = parser.parse_args(argv)
     if len(args.appid) != 18 or not args.appid.startswith('wx'):
         parser.error('AppID 必须为 wx 开头的 18 位字符串。')
+    return args
+
+
+def main():
+    args = parse_args()
     engine_version = subprocess.check_output([args.godot, '--version'], text=True).strip()
     if not engine_version.startswith('4.7.'):
-        parser.error(f'当前固定模板只验证 Godot 4.7 系列，实际为 {engine_version}')
+        raise SystemExit(f'当前固定模板只验证 Godot 4.7 系列，实际为 {engine_version}')
     build = ROOT / 'build'
     build.mkdir(exist_ok=True)
     (build / '.gdignore').touch()

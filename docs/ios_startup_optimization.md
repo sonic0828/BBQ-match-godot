@@ -1,6 +1,6 @@
 # iPhone 启动与稳定性优化
 
-2026-09-29 用户将重点调整为安卓再次进入后的 UI 缺失，12 Mini 退出暂不专项优化。当前完整包为 D 对照 `20260929-103330`，iOS 保持轻量 Loading 配置；已确认和待验收内容见 [安卓再次进入](android_reentry.md)。以下保留此前 iPhone 优化及第二轮记录。
+2026-09-29 用户确认两台 iPhone 提速、Loading 进度修复，以及 D 包安卓两次进入 UI 正常。普通导出现默认 iOS 轻量 Loading、安卓 D 与原生等待，详细诊断需显式 `--diagnostics`；WASM 预读、主画布 DPR 和限帧实验均未默认启用。12 Mini 二次进入卡死／整个微信退出按用户要求暂缓，15～20 秒目标也未完成系统验收。合并前先完成 [存档修复与冷启动验收](save_persistence.md)。以下保留此前优化调查记录，历史构建参数不代表当前默认值。
 
 ## 再次进入与 Loading 修正（第二轮）
 
@@ -13,27 +13,27 @@
 - **入口与恢复证据**：每次新实例生成 ID，并从上次本地检查点递增启动次数；记录构建号、资源标识、启动／进入场景值、前后台事件、引擎入口次数、实际渲染路径及恢复后的首帧。仅保留场景值，不记录入口 query 等用户数据。
 - **有界观察**：首次首帧后采样 120 秒；结束后不再连续采样，但保留少量前后台检查点。每次真正从后台返回后重新开启 30 秒错误／内存／上下文观察，重复 `onShow` 不延长窗口。恢复首帧必须由 Godot 完成实际 `frame_post_draw` 后报告，单纯收到 `onShow` 不算成功。首帧仍不保证全部 UI 图元正确，须结合画面。
 - **Loading 表达**：只有下载阶段显示进度槽与百分比；优先使用有效的下载字节比例，缺少字节信息时按 API 的百分比回退，显示不倒退。等待和引擎准备阶段只显示文案，移除固定 22% 的居中短条。最后阶段在清理前立即绘制一次，清理后不再接管画布。
-- **独立安卓 D 对照**：B 与 D 都不创建 Loader 辅助 Canvas／图片／GL，D 仅在引擎首次创建上下文前选择标准 WebGL2。现有 C 同时恢复 Loader，不用于本轮与 B 的单变量比较。默认仍为 B，D 未经 OPPO 真机验证，不直接替换默认策略。
+- **独立安卓 D 对照**：B 与 D 都不创建 Loader 辅助 Canvas／图片／GL，D 仅在引擎首次创建上下文前选择标准 WebGL2。C 同时恢复 Loader，不用于与 B 的单变量比较。第二轮当时默认 B；后续 OPPO 验证 D 正常，现已改为默认 D。
 - **原生等待提示**：`--android-native-loading` 在安卓启动期间使用微信原生等待提示，不触碰主 GL；切后台隐藏，启动未完成时回前台可恢复，首帧／启动失败后关闭。iOS 不启用，首页后再次进入不重复展示。该开关在当前完整测试包开启，手机体验仍需核对。
 - **最小绘制场景**：已有最小场景增加图片、纯色／透明块、直角／圆角带阴影样式框、直接绘制矩形／圆形和可点击按钮，用于肉眼识别缺失类别。它仍共用同一引擎，但资源内容已变化，不将上一版空标签场景的时间作为严格相同基线。
 
-本轮完整测试包导出：
+复现第二轮 B 测试配置时，按当前脚本显式填写：
 
 ```bash
-python3 tools/export_wechat.py --ios-startup-profile loader --android-native-loading
+python3 tools/export_wechat.py --diagnostics --ios-startup-profile loader --android-render-probe B
 ```
 
 若 OPPO 再现缺失，用同一源码单独导出以下 D 包进行对照，其他参数保持一致；每次覆盖前关闭烧烤工程，导出后重开：
 
 ```bash
-python3 tools/export_wechat.py --ios-startup-profile loader --android-native-loading --android-render-probe D
+python3 tools/export_wechat.py --diagnostics --ios-startup-profile loader --android-render-probe D
 ```
 
 最小场景在相同命令上添加 `--startup-minimal`，B 与 D 依次比较。测试后重新导出完整包；最终交付目录必须核对 `startup_minimal=false`。
 
 手机验证顺序：扫码进入 → 首页停留超过 120 秒 → 退出至微信 → 从最近使用重新进入 → 首页／关卡选择／暂停界面截图并保留日志。再分别测试短暂切后台恢复、完整重启微信后再次进入。记录 `[BBQ instance]`、`[BBQ lifecycle]`、`[BBQ previous startup]`、`[BBQ startup report]`；恢复过程重点看实例 ID 是否变化、`resumeCount`、`resumeFrameElapsedMs`、`engineEntries`、上下文事件和最后检查点。
 
-P0／P1 已实现；P2 的最小场景和单变量入口已实现，具体渲染修复待手机对照；P3 的闪退根因和修复、P4 中需测量收益的进一步提速、P5 的三台真机验收仍未完成。没有同时启用 WASM 预读跳过、主画布 DPR 改动或引擎裁剪。
+截至第二轮：P0／P1 已实现；P2 最小场景和单变量入口已实现；P3 闪退根因、P4 进一步提速、P5 系统真机验收未完成。后续安卓 D 复测结果见文首；没有同时启用 WASM 预读跳过、主画布 DPR 改动或引擎裁剪。
 
 ## 目标与当前状态
 
@@ -64,13 +64,13 @@ P0／P1 已实现；P2 的最小场景和单变量入口已实现，具体渲染
 
 | 命令 | iOS 行为 | 用途 |
 | --- | --- | --- |
-| `python3 tools/export_wechat.py --diagnostics` | 共用修正与原 Loading 分辨率 | 本分支基线，不等于原提交旧包 |
-| `python3 tools/export_wechat.py --ios-startup-profile loader` | 共用修正＋轻量 Loading | 当前交付的完整游戏包，先测试此组 |
-| `python3 tools/export_wechat.py --ios-startup-profile wasm` | 共用修正＋原生 WASM 跳过预读 | 判断冗余读取的实际成本；原生条件不满足时自动保持读取 |
-| `python3 tools/export_wechat.py --ios-startup-profile combined` | 同时启用两项实验 | 两个单项均稳定且有收益后再测 |
-| `python3 tools/export_wechat.py --startup-minimal --ios-startup-profile loader` | 同模板、同配置的最小场景 | 与完整 loader 组比较资源与场景成本；不是正式游戏首页 |
+| `python3 tools/export_wechat.py --diagnostics --ios-startup-profile baseline` | 共用修正与原 Loading 分辨率 | 对照基线，不等于原提交旧包 |
+| `python3 tools/export_wechat.py --diagnostics` | 共用修正＋轻量 Loading | 当前默认策略的诊断包 |
+| `python3 tools/export_wechat.py --diagnostics --ios-startup-profile wasm` | 共用修正＋原生 WASM 跳过预读 | 判断冗余读取的实际成本；原生条件不满足时自动保持读取 |
+| `python3 tools/export_wechat.py --diagnostics --ios-startup-profile combined` | 同时启用两项实验 | 两个单项均稳定且有收益后再测 |
+| `python3 tools/export_wechat.py --diagnostics --startup-minimal` | 同模板、同配置的最小场景 | 与完整 loader 组比较资源与场景成本；不是正式游戏首页 |
 
-非 baseline 实验和最小场景自动启用诊断；选项仅对 iOS 应用，安卓／开发者工具保持 B。默认普通导出不自动启用实验或 120 秒采样。A/C 安卓调查入口保留，普通导出不强制关闭安卓 WXGLX。
+当前详细诊断统一通过 `--diagnostics` 显式开启，最小场景／对照命令需要日志时也应加此参数。iOS 选项仅对 iOS 应用，默认 `loader`；安卓／开发者工具默认 D。A/B/C、baseline/wasm/combined 保留为显式调查入口，普通导出不启用 120 秒采样。
 
 最小场景位于 `tests/fixtures/wechat_startup/`。它与游戏共用固定模板和引擎，仅资源工程不同。验证结束必须重新导出完整游戏；当前 `build/wechat/` 已恢复为完整游戏。
 

@@ -2,7 +2,9 @@
 
 ## 当前范围（2026-09-29）
 
-用户将 OPPO Find N3 Flip 再次进入后的 UI 缺失设为当前重点，iPhone 12 Mini 整个微信退出暂不做专项优化。继续使用 `codex/ios-startup-optimization`。当前交付是完整游戏 D 对照包 `20260929-103330`，供 OPPO 真机判定渲染兼容策略；普通无参数导出的安卓默认仍为 B，尚未凭模拟器结果改为正式默认。
+用户确认完整 D 包 `20260929-103330` 两次进入 UI 正常。新日志实际为标准 WebGL2，未出现 `vertex_attrib`，7 次同实例恢复均有首帧（14～76 ms）；有一条分包阶段宿主 timeout，之后成功启动，不能说整个日志零错误。普通导出据此固定为安卓 D，iOS 保持轻量 Loading；详细诊断需显式 `--diagnostics`。仍需更多安卓机型验证性能与兼容性。
+
+继续使用 `codex/ios-startup-optimization`。iPhone 12 Mini 整个微信退出暂不做专项优化。合并前新增的存档修复和冷启动验收见 [微信存档](save_persistence.md)；本次暖恢复日志不能替代存档冷启动验证。以下 B／D 构建记录保留历史对照。
 
 ## 已确认的证据
 
@@ -18,10 +20,10 @@
 
 ```bash
 # 相同源码 B 基线：保留模板自动渲染路径，跳过自绘 Loading。
-python3 tools/export_wechat.py --ios-startup-profile loader --android-native-loading --android-render-probe B
+python3 tools/export_wechat.py --diagnostics --android-render-probe B
 
 # 当前交付 D：同样跳过自绘 Loading，仅选择标准 WebGL2。
-python3 tools/export_wechat.py --ios-startup-profile loader --android-native-loading --android-render-probe D
+python3 tools/export_wechat.py --diagnostics --android-render-probe D
 ```
 
 B `20260929-103149` 与 D `20260929-103330` 的 PCK 均为 5,433,028 字节，SHA-256 均为 `952c875f385f89278d3dd782a8246c31cbcbbf4ed27ad7437785e7013d1bb203`；构建清单和校验记录位于 `build/previews/2026-09-29/android-reentry/`。D 包保持 iOS 轻量 Loading 与原渲染路径，未启用 iOS WASM、主画布 DPR 或限帧实验。
@@ -33,6 +35,6 @@ B `20260929-103149` 与 D `20260929-103330` 的 PCK 均为 5,433,028 字节，SH
 3. 同一实例恢复应依次看到微信 show、Godot 窗口焦点回执、`resume:first-frame`，`resumeFrameElapsedMs` 有值。新实例应有新的 `[BBQ instance]` 和正常启动标记。对局回前台保持暂停、点击继续后倒计时和声音恢复。
 4. 收集原始 vConsole，检查 `WAPixi`／`vertex_attrib`，不只看汇总计数。记录可操作时间、卡顿和发热，首页／对局各持续运行 10 分钟。iPhone 16 Pro 做启动与前后台回归；12 Mini 当前只记录结果。
 
-若 D 恢复完整 UI、相关错误消失且性能可接受，再确定安卓正式策略；若 D 仍失败，保持 D 只关闭 `--android-native-loading` 做单项对照，或分别用 B／D 加 `--startup-minimal` 检查缺失的图元类别。不要同时改材质、DPR、资源加载和引擎版本。最小场景测试完成后恢复完整游戏包。
+用户已确认 D 恢复完整 UI，并已设为普通导出默认。若后续设备仍复现，可在诊断包仅加 `--no-android-native-loading` 做单项对照，或分别用 B／D 加 `--startup-minimal` 检查缺失图元；不要同时改材质、DPR、资源加载和引擎版本。最小场景测试完成后恢复完整游戏包。
 
-本机检查详见 `docs/verification.md` 同日记录。模拟器正常不能替代 OPPO 复测，当前未宣称安卓问题已真机修复。
+本机检查详见 `docs/verification.md` 同日记录。OPPO 用户复测已通过 UI 显示；冷启动存档以及其他机型仍按上述范围独立验收。

@@ -83,7 +83,7 @@ for (const fail of ['wasm', 'read', 'fs-error', 'fs-reject']) {
 test('固定引擎首次创建上下文时 D 真正选择 WebGL2，B 与 iOS 保持 WXGLX', () => {
     const helpers = source.slice(source.indexOf('function wxGLXGetNativeExport('), source.indexOf('function wxGLXCallNative('));
     const createContext = source.slice(source.indexOf('function wxGLXPatchCreateContext('), source.indexOf('function wxGLXPatchMakeContextCurrent('));
-    for (const [platform, probe, expected] of [['android', 'B', 'wxwebgl2'], ['android', 'D', 'webgl2'], ['ios', 'D', 'wxwebgl2']]) {
+    for (const [platform, probe, expected] of [['android', 'B', 'wxwebgl2'], ['android', 'D', 'webgl2'], ['android', undefined, 'webgl2'], ['ios', 'D', 'wxwebgl2']]) {
         const types = [];
         const root = {};
         const wx = { getDeviceInfo: () => ({ platform }), env: { isSupportEmscriptenGLX: true } };
