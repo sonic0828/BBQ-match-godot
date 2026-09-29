@@ -30,7 +30,18 @@ func load_progress(path: String = "") -> void:
 	if migrating:
 		# Renaming the application changes user://; retain existing prototype progress.
 		source_path = _legacy_path(OS.get_user_data_dir().get_base_dir())
-	if config.load(source_path) != OK:
+	var loaded = config.load(source_path)
+	var recovered = false
+	# Old WeChat builds left committed-looking snapshots in .tmp. New writes
+	# use .pending; failed new transactions must never be recovered as successes.
+	var legacy_temp = path + ".tmp"
+	if int(config.get_value("storage", "format", 0)) == 0 and FileAccess.file_exists(legacy_temp):
+		var candidate = ConfigFile.new()
+		var newer = FileAccess.get_modified_time(legacy_temp) > FileAccess.get_modified_time(source_path)
+		if newer and candidate.load(legacy_temp) == OK and _valid_recovery_snapshot(candidate):
+			config = candidate
+			recovered = true
+	if loaded != OK and not recovered:
 		return
 	highest_unlocked = clampi(int(config.get_value("progress", "highestUnlockedLevel", 1)), 1, 10)
 	last_selected = clampi(int(config.get_value("progress", "lastSelectedLevel", 1)), 1, highest_unlocked)
@@ -52,8 +63,33 @@ func load_progress(path: String = "") -> void:
 	bag_daily_used = bool(config.get_value("economy", "bagDailyUsed", false))
 	run_serial = maxi(0, int(config.get_value("economy", "runSerial", 0)))
 	last_reward_run = maxi(0, int(config.get_value("economy", "lastRewardRun", 0)))
-	if migrating or economy_migration:
-		save_progress(path)
+	if migrating or economy_migration or recovered:
+		var result = save_progress(path)
+		if recovered and result == OK:
+			print("[BBQ save] Recovered complete legacy snapshot; original files retained")
+
+func _valid_recovery_snapshot(config: ConfigFile) -> bool:
+	var fields = {
+		"progress": {"highestUnlockedLevel": TYPE_INT, "lastSelectedLevel": TYPE_INT, "completedLevels": TYPE_ARRAY},
+		"settings": {"audioEnabled": TYPE_BOOL, "musicEnabled": TYPE_BOOL, "vibrationEnabled": TYPE_BOOL},
+		"economy": {"coins": TYPE_INT, "bagStock": TYPE_INT, "bagTutorialDone": TYPE_BOOL,
+			"bagDay": TYPE_STRING, "bagDailyUsed": TYPE_BOOL, "runSerial": TYPE_INT, "lastRewardRun": TYPE_INT},
+	}
+	for section in fields:
+		for key in fields[section]:
+			if not config.has_section_key(section, key) or typeof(config.get_value(section, key)) != fields[section][key]: return false
+	var highest = config.get_value("progress", "highestUnlockedLevel")
+	var selected = config.get_value("progress", "lastSelectedLevel")
+	if highest < 1 or highest > 10 or selected < 1 or selected > highest: return false
+	var seen: Array = []
+	for level in config.get_value("progress", "completedLevels"):
+		if not level is int or level < 1 or level > 10 or level in seen or mini(level + 1, 10) > highest: return false
+		seen.append(level)
+	for key in ["coins", "bagStock", "runSerial", "lastRewardRun"]:
+		if config.get_value("economy", key) < 0: return false
+	var day: String = config.get_value("economy", "bagDay")
+	if not day.is_empty() and (day.length() != 10 or Time.get_date_string_from_unix_time(Time.get_unix_time_from_datetime_string(day)) != day): return false
+	return config.get_value("economy", "lastRewardRun") <= config.get_value("economy", "runSerial")
 
 func _legacy_path(directory: String) -> String:
 	for old_name in LEGACY_NAMES:
@@ -65,7 +101,18 @@ func _legacy_path(directory: String) -> String:
 func save_progress(path: String = "") -> Error:
 	if path.is_empty():
 		path = storage_path
+	# Preserve both old candidates before the first post-fix overwrite. Leave
+	# .tmp untouched even when incomplete or its timestamp cannot be trusted.
+	if FileAccess.file_exists(path + ".tmp") and FileAccess.file_exists(path) and not FileAccess.file_exists(path + ".legacy-backup"):
+		var original = FileAccess.open(path, FileAccess.READ)
+		if original == null: return FileAccess.get_open_error()
+		var bytes = original.get_buffer(original.get_length())
+		if bytes.size() != original.get_length(): return ERR_FILE_CANT_READ
+		original.close()
+		var backup_result = _commit_snapshot(bytes, path + ".legacy-backup")
+		if backup_result != OK: return backup_result
 	var config = ConfigFile.new()
+	config.set_value("storage", "format", 1)
 	config.set_value("progress", "highestUnlockedLevel", highest_unlocked)
 	config.set_value("progress", "completedLevels", completed)
 	config.set_value("progress", "lastSelectedLevel", last_selected)
@@ -80,12 +127,19 @@ func save_progress(path: String = "") -> Error:
 	config.set_value("economy", "runSerial", run_serial)
 	config.set_value("economy", "lastRewardRun", last_reward_run)
 	# Replace one complete snapshot: never persist a debit without its item credit.
-	var result = config.save(path + ".tmp")
-	if result == OK:
-		result = DirAccess.rename_absolute(path + ".tmp", path)
+	var result = _commit_snapshot(config.encode_to_text().to_utf8_buffer(), path)
 	if result != OK:
 		push_warning("Could not save progress: %s" % error_string(result))
 	return result
+
+func _commit_snapshot(bytes: PackedByteArray, path: String) -> Error:
+	var file = FileAccess.open(path + ".pending", FileAccess.WRITE)
+	if file == null: return FileAccess.get_open_error()
+	file.store_buffer(bytes)
+	var result = file.get_error()
+	file.close()
+	if result != OK: return result
+	return DirAccess.rename_absolute(path + ".pending", path)
 
 func begin_run() -> int:
 	run_serial += 1

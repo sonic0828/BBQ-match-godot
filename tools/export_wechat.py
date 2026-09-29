@@ -44,6 +44,11 @@ def patch_wechat_sdk(source):
 
 
 def patch_wechat_engine(source):
+    # Guard the injection point; the entire template is also pinned by SHA-256.
+    if source.count('var GodotFS=') != 1 or source.count('rename:function(old_node,new_dir,new_name)') != 1:
+        raise ValueError('微信文件系统补丁与固定模板不匹配。')
+    source = source.replace('var GodotFS=',
+                            (ROOT / 'platform/wechat/filesystem-patch.js').read_text() + '\nvar GodotFS=')
     replacements = {
         'Module["instantiateWasm"](info,(mod,inst)=>{resolve(receiveInstance(mod,inst))})':
             'Module["instantiateWasm"](info,(mod,inst)=>{resolve(receiveInstance(mod,inst))},reject)',
@@ -353,7 +358,7 @@ def main():
             'template': URL, 'template_sha256': SHA256,
             'runtime_patches': ['sdk-preserve-device-pixel-ratio', 'loader-stop-after-cleanup',
                                 'loader-render-probe', 'loader-progress-and-release',
-                                'sdk-file-read-errors', 'engine-startup-probes'],
+                                'sdk-file-read-errors', 'engine-startup-probes', 'wxmemfs-durable-rename'],
             'diagnostics': args.diagnostics, 'build': build_id,
             'android_render_probe': args.android_render_probe,
             'android_native_loading': args.android_native_loading,
